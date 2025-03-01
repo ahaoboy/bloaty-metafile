@@ -24,8 +24,6 @@ impl Node {
                     name: part.to_string(),
                     vmsize,
                     filesize,
-                    vmsize,
-                    filesize,
                     count: 1,
                     nodes: HashMap::new(),
                 });
