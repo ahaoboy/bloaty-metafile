@@ -22,8 +22,8 @@ impl Node {
             if i == path.len() - 1 {
                 current.nodes.entry(part.to_string()).or_insert(Node {
                     name: part.to_string(),
-                    vmsize: vmsize,
-                    filesize: filesize,
+                    vmsize,
+                    filesize,
                     count: 1,
                     nodes: HashMap::new(),
                 });
@@ -40,7 +40,7 @@ impl Node {
     }
 }
 
-pub fn get_tree(csv: &str) -> Node {
+pub fn get_tree(csv: &str, cargo_lock: Option<String>) -> Node {
     let mut tree = Node {
         name: "__ROOT__".to_string(),
         vmsize: 0,
@@ -49,16 +49,18 @@ pub fn get_tree(csv: &str) -> Node {
         nodes: HashMap::new(),
     };
 
-    let lock = Lockfile::load("Cargo.lock").unwrap();
+    let lock = cargo_lock.and_then(|p| Lockfile::load(&p).ok());
     let mut parent: HashMap<String, String> = HashMap::new();
-    for pkg in lock.packages {
-        let name = pkg.name.as_str().replace("-", "_");
-        if !parent.contains_key(&name) {
-            parent.insert(name.clone(), name.clone());
-        }
-        for dep in pkg.dependencies {
-            let dep_name = dep.name.as_str().replace("-", "_");
-            parent.insert(dep_name.clone(), name.clone());
+    if let Some(lock) = lock {
+        for pkg in lock.packages {
+            let name = pkg.name.as_str().replace("-", "_");
+            if !parent.contains_key(&name) {
+                parent.insert(name.clone(), name.clone());
+            }
+            for dep in pkg.dependencies {
+                let dep_name = dep.name.as_str().replace("-", "_");
+                parent.insert(dep_name.clone(), name.clone());
+            }
         }
     }
 
@@ -72,7 +74,7 @@ pub fn get_tree(csv: &str) -> Node {
         // FIXME: filter crate name
         if symbols_parts.len() == 1
             || symbols_parts
-                .get(0)
+                .first()
                 .unwrap_or(&String::new())
                 .contains("..")
         {
@@ -81,13 +83,12 @@ pub fn get_tree(csv: &str) -> Node {
             // crate
             symbols_parts.insert(1, section.to_string());
             let mut prefix = vec![];
-
             let mut top = &symbols_parts[0];
             loop {
-                let Some(p) = parent.get(top) else{
-                  break;
+                let Some(p) = parent.get(top) else {
+                    break;
                 };
-                if  p == top {
+                if p == top {
                     break;
                 }
                 prefix.push(top.clone());
@@ -104,19 +105,18 @@ pub fn get_tree(csv: &str) -> Node {
     tree
 }
 
-pub fn from_csv(csv: &str) -> Metafile {
-    let tree = get_tree(csv);
-    let meta = convert_node_to_metafile(tree);
-    meta
+pub fn from_csv(csv: &str, name: &str, cargo_lock: Option<String>) -> Metafile {
+    let tree = get_tree(csv, cargo_lock);
+
+    convert_node_to_metafile(tree, name)
 }
 
-pub fn convert_node_to_metafile(root: Node) -> Metafile {
+pub fn convert_node_to_metafile(root: Node, name: &str) -> Metafile {
     let mut inputs = HashMap::new();
     for i in &root.nodes {
-        traverse(&i.1, &mut inputs, None);
+        traverse(i.1, &mut inputs, None);
     }
     let entry_point_path = root.name.clone();
-    let meta_name = "Binary-Size-Analyzer".to_string();
     let output_inputs = inputs
         .iter()
         .map(|(path, input)| {
@@ -136,7 +136,7 @@ pub fn convert_node_to_metafile(root: Node) -> Metafile {
         entry_point: Some(entry_point_path),
         css_bundle: None,
     };
-    let outputs = HashMap::from([(meta_name, output)]);
+    let outputs = HashMap::from([(name.to_string(), output)]);
     Metafile { inputs, outputs }
 }
 

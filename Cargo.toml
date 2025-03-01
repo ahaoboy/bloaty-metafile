@@ -13,3 +13,4 @@ include = ["/src", "/Cargo.toml", "/README.md"]
 serde-metafile = "0.1"
 serde_json = "1"
 cargo-lock = "10"
+clap = { version = "4.5", features = ["derive"] }
