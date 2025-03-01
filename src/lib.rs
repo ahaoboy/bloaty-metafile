@@ -21,8 +21,8 @@ impl Node {
             if i == path.len() - 1 {
                 current.nodes.entry(part.to_string()).or_insert(Node {
                     name: part.to_string(),
-                    vmsize: vmsize,
-                    filesize: filesize,
+                    vmsize,
+                    filesize,
                     count: 1,
                     nodes: HashMap::new(),
                 });
@@ -56,7 +56,7 @@ pub fn get_tree(csv: &str) -> Node {
         let filesize: u64 = parts[3].parse().unwrap();
         let mut symbols_parts: Vec<&str> = symbols.split("::").collect();
         // FIXME: filter crate name
-        if symbols_parts.len() == 1 || symbols_parts.get(0).unwrap_or(&"").contains("..") {
+        if symbols_parts.len() == 1 || symbols_parts.first().unwrap_or(&"").contains("..") {
             symbols_parts.insert(0, section);
         } else {
             symbols_parts.insert(1, section);
@@ -69,16 +69,17 @@ pub fn get_tree(csv: &str) -> Node {
 
 pub fn from_csv(csv: &str) -> Metafile {
     let tree = get_tree(csv);
-    let meta = convert_node_to_metafile(tree);
-    meta
+
+    convert_node_to_metafile(tree)
 }
 
 pub fn convert_node_to_metafile(root: Node) -> Metafile {
     let mut inputs = HashMap::new();
     for i in &root.nodes {
-        traverse(&i.1, &mut inputs, None);
+        traverse(i.1, &mut inputs, None);
     }
     let entry_point_path = root.name.clone();
+    // FIXME: maybe add --name=crate-name
     let meta_name = "Binary-Size-Analyzer".to_string();
     let output_inputs = inputs
         .iter()

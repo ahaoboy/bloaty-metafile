@@ -1,5 +1,7 @@
 ```bash
 
+cargo binstall bloaty-metafile
+
 bloaty ./bloaty -d sections,symbols -n 0  --csv | bloaty-metafile > meta.json
 
 ```
