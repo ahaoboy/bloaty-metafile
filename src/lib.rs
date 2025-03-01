@@ -63,6 +63,11 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
         }
     }
 
+    let root_crate = parent
+        .iter()
+        .find(|(k, _)| parent.get(&k.to_string()) == Some(k))
+        .map(|i| i.0);
+
     for line in csv.lines().skip(1) {
         let parts: Vec<&str> = line.split(',').collect();
         let section = parts[0];
@@ -78,22 +83,26 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
                 .contains("..")
         {
             symbols_parts.insert(0, section.to_string());
+            // FIXME: Put all unknown data into sections and distinguish them from crates
+            symbols_parts.insert(0, "sections".to_string());
         } else {
             // crate
             symbols_parts.insert(1, section.to_string());
             let mut prefix = vec![];
             let mut top = &symbols_parts[0];
             loop {
+                if Some(&symbols_parts[0]) == (root_crate) {
+                    break;
+                }
                 let Some(p) = parent.get(top) else {
                     break;
                 };
+                prefix.push(top.clone());
                 if p == top {
                     break;
                 }
-                prefix.push(top.clone());
                 top = p;
             }
-
             for i in prefix {
                 symbols_parts.insert(0, i.clone());
             }
