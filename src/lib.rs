@@ -49,9 +49,8 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
         nodes: HashMap::new(),
     };
 
-    let lock = lock.and_then(|p| Lockfile::load(&p).ok());
     let mut parent: HashMap<String, String> = HashMap::new();
-    if let Some(lock) = lock {
+    if let Ok(lock) = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string())) {
         for pkg in lock.packages {
             let name = pkg.name.as_str().replace("-", "_");
             if !parent.contains_key(&name) {
