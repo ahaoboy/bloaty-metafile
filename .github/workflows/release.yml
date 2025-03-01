@@ -1,0 +1,71 @@
+name: Release
+
+permissions:
+  contents: write
+
+on: [push]
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -CeEuo pipefail {0}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: release-dist-manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: ncipollo/release-action@v1
+
+  upload-assets:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            RUSTFLAGS: -C target-feature=+crt-static
+          - target: x86_64-pc-windows-gnu
+            os: windows-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: '-A warnings'
+          toolchain: 'stable'
+
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          dry-run: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          bin: bloaty-metafile
+          target: ${{ matrix.target }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ startsWith(github.ref, 'refs/tags/')  && github.ref || 'refs/tags/dummy' }}
+        env:
+          RUSTFLAGS: ${{ matrix.RUSTFLAGS }}
+      - name: Get target name for artifact
+        id: artifact-target
+        run: |
+          target="${{ matrix.target }}"
+          if [[ -z "${target}" ]]; then
+            host=$(rustc -vV | grep -E '^host:' | cut -d' ' -f2)
+            printf '%s\n' "artifact-target=${host}" >>"${GITHUB_OUTPUT}"
+          elif [[ "${{ matrix.build-tool }}" == 'cargo-zigbuild' ]]; then
+            printf '%s\n' "artifact-target=${target%%.*}" >>"${GITHUB_OUTPUT}"
+          else
+            printf '%s\n' "artifact-target=${target}" >>"${GITHUB_OUTPUT}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bloaty-metafile-${{ steps.artifact-target.outputs.artifact-target }}
+          path: bloaty-metafile-${{ steps.artifact-target.outputs.artifact-target }}.*
