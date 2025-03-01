@@ -40,7 +40,7 @@ impl Node {
     }
 }
 
-pub fn get_tree(csv: &str, cargo_lock: Option<String>) -> Node {
+pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
     let mut tree = Node {
         name: "__ROOT__".to_string(),
         vmsize: 0,
@@ -49,7 +49,7 @@ pub fn get_tree(csv: &str, cargo_lock: Option<String>) -> Node {
         nodes: HashMap::new(),
     };
 
-    let lock = cargo_lock.and_then(|p| Lockfile::load(&p).ok());
+    let lock = lock.and_then(|p| Lockfile::load(&p).ok());
     let mut parent: HashMap<String, String> = HashMap::new();
     if let Some(lock) = lock {
         for pkg in lock.packages {
@@ -105,8 +105,8 @@ pub fn get_tree(csv: &str, cargo_lock: Option<String>) -> Node {
     tree
 }
 
-pub fn from_csv(csv: &str, name: &str, cargo_lock: Option<String>) -> Metafile {
-    let tree = get_tree(csv, cargo_lock);
+pub fn from_csv(csv: &str, name: &str, lock: Option<String>) -> Metafile {
+    let tree = get_tree(csv, lock);
 
     convert_node_to_metafile(tree, name)
 }
