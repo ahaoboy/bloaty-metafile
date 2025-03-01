@@ -1,3 +1,4 @@
+use cargo_lock::Lockfile;
 use serde_metafile::{Import, Input, InputDetail, Metafile, Output};
 use std::collections::HashMap;
 
@@ -11,10 +12,10 @@ pub struct Node {
 }
 
 impl Node {
-    fn add_path(&mut self, path: &[&str], vmsize: u64, filesize: u64) {
+    fn add_path(&mut self, path: &[String], vmsize: u64, filesize: u64) {
         let mut current = self;
         for i in 0..path.len() {
-            let part = path[i];
+            let part = path[i].clone();
             current.vmsize += vmsize;
             current.filesize += filesize;
             current.count += 1;
@@ -48,18 +49,54 @@ pub fn get_tree(csv: &str) -> Node {
         nodes: HashMap::new(),
     };
 
+    let lock = Lockfile::load("Cargo.lock").unwrap();
+    let mut parent: HashMap<String, String> = HashMap::new();
+    for pkg in lock.packages {
+        let name = pkg.name.as_str().replace("-", "_");
+        if !parent.contains_key(&name) {
+            parent.insert(name.clone(), name.clone());
+        }
+        for dep in pkg.dependencies {
+            let dep_name = dep.name.as_str().replace("-", "_");
+            parent.insert(dep_name.clone(), name.clone());
+        }
+    }
+
     for line in csv.lines().skip(1) {
         let parts: Vec<&str> = line.split(',').collect();
         let section = parts[0];
         let symbols = parts[1];
         let vmsize: u64 = parts[2].parse().unwrap();
         let filesize: u64 = parts[3].parse().unwrap();
-        let mut symbols_parts: Vec<&str> = symbols.split("::").collect();
+        let mut symbols_parts: Vec<String> = symbols.split("::").map(|i| i.to_string()).collect();
         // FIXME: filter crate name
-        if symbols_parts.len() == 1 || symbols_parts.get(0).unwrap_or(&"").contains("..") {
-            symbols_parts.insert(0, section);
+        if symbols_parts.len() == 1
+            || symbols_parts
+                .get(0)
+                .unwrap_or(&String::new())
+                .contains("..")
+        {
+            symbols_parts.insert(0, section.to_string());
         } else {
-            symbols_parts.insert(1, section);
+            // crate
+            symbols_parts.insert(1, section.to_string());
+            let mut prefix = vec![];
+
+            let mut top = &symbols_parts[0];
+            loop {
+                let Some(p) = parent.get(top) else{
+                  break;
+                };
+                if  p == top {
+                    break;
+                }
+                prefix.push(top.clone());
+                top = p;
+            }
+
+            for i in prefix {
+                symbols_parts.insert(0, i.clone());
+            }
         };
 
         tree.add_path(&symbols_parts, vmsize, filesize);

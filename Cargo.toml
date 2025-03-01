@@ -12,3 +12,4 @@ include = ["/src", "/Cargo.toml", "/README.md"]
 [dependencies]
 serde-metafile = "0.1"
 serde_json = "1"
+cargo-lock = "10"
