@@ -24,6 +24,8 @@ impl Node {
                     name: part.to_string(),
                     vmsize,
                     filesize,
+                    vmsize,
+                    filesize,
                     count: 1,
                     nodes: HashMap::new(),
                 });
@@ -114,6 +116,7 @@ pub fn from_csv(csv: &str, name: &str, lock: Option<String>) -> Metafile {
 pub fn convert_node_to_metafile(root: Node, name: &str) -> Metafile {
     let mut inputs = HashMap::new();
     for i in &root.nodes {
+        traverse(i.1, &mut inputs, None);
         traverse(i.1, &mut inputs, None);
     }
     let entry_point_path = root.name.clone();
