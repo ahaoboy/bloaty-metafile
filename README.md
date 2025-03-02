@@ -48,8 +48,17 @@ If a lock file can be provided, by default, the Cargo.lock file in the current d
 
 For large applications, the dependency tree will be very deep, which will cause the generated JSON to be very large and contain too much useless information. You can use the --deep option to limit the maximum depth of the dependency.
 
+The default value of deep is 8, which is probably suitable for most programs. 0 means no limit
+
 deep: 4, json: 6.7M
 ![llrt-deep-4](https://github.com/user-attachments/assets/2780c0ff-3a04-4aa3-946f-5c024347f1dd)
 
 deep: 8, json: 12M
 ![llrt-deep-8](https://github.com/user-attachments/assets/89a786ff-45e6-47b7-a931-edd59d1dff30)
+
+
+## windows
+
+bloaty: PE doesn't support this data source
+
+bloaty-metafile just converts the csv output by bloaty to json. You can generate csv files on other platforms with bloaty, and then convert them on windows.

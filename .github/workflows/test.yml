@@ -1,0 +1,64 @@
+name: Test
+
+permissions:
+  contents: write
+
+on: [push]
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -CeEuo pipefail {0}
+
+jobs:
+  rust-test:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-14
+          # - target: x86_64-pc-windows-gnu
+          #   os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v4
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: cargo test
+        run: |
+          cargo test
+      - name: cargo install
+        run: |
+          cargo install --path=.
+      - name: install easy-install
+        uses: ahaoboy/easy-setup@v1
+        with:
+          url: https://github.com/ahaoboy/bloaty-build
+      - name: build --release
+        run: |
+          cargo build --release
+      - name: bloaty csv
+        run: |
+          bloaty ./target/release/bloaty-metafile -d sections,symbols -n 10 --csv > bloaty-metafile-${{ matrix.os }}.csv
+      - name: bloaty-metafile.json
+        run: |
+          cat bloaty-metafile-${{ matrix.os }}.csv | bloaty-metafile --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
+          ls -lh
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloaty-metafile-${{ matrix.os }}
+          path: |
+            bloaty-metafile-${{ matrix.os }}.csv
+            bloaty-metafile-${{ matrix.os }}.json
