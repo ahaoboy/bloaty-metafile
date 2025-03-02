@@ -38,9 +38,18 @@ https://esbuild.github.io/analyze/
 
 Because bloaty's output does not include crate dependency information, the sizes of crates are all displayed separately.
 
-![llrt](https://github.com/user-attachments/assets/669c033f-72e8-49e9-b030-dffc370b6580)
+![llrt-no-lock](https://github.com/user-attachments/assets/669c033f-72e8-49e9-b030-dffc370b6580)
 
 If a lock file can be provided, by default, the Cargo.lock file in the current directory is used. the dependency size can be correctly displayed by analyzing the crate dependencies.
 
-![llrt](https://github.com/user-attachments/assets/756bb69e-d8b5-42b2-946f-8e5439284209)
+![llrt-lock](https://github.com/user-attachments/assets/756bb69e-d8b5-42b2-946f-8e5439284209)
 
+## deep
+
+For large applications, the dependency tree will be very deep, which will cause the generated JSON to be very large and contain too much useless information. You can use the --deep option to limit the maximum depth of the dependency.
+
+deep: 4, json: 6.7M
+![llrt-deep-4](https://github.com/user-attachments/assets/2780c0ff-3a04-4aa3-946f-5c024347f1dd)
+
+deep: 8, json: 12M
+![llrt-deep-8](https://github.com/user-attachments/assets/89a786ff-45e6-47b7-a931-edd59d1dff30)

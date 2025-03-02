@@ -120,17 +120,17 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
     tree
 }
 
-pub fn from_csv(csv: &str, name: &str, lock: Option<String>) -> Metafile {
+pub fn from_csv(csv: &str, name: &str, lock: Option<String>, deep: usize) -> Metafile {
     let tree = get_tree(csv, lock);
 
-    convert_node_to_metafile(tree, name)
+    convert_node_to_metafile(tree, name, deep)
 }
 
-pub fn convert_node_to_metafile(root: Node, name: &str) -> Metafile {
+pub fn convert_node_to_metafile(root: Node, name: &str, deep: usize) -> Metafile {
     let mut inputs = HashMap::new();
     for i in &root.nodes {
-        traverse(i.1, &mut inputs, None);
-        traverse(i.1, &mut inputs, None);
+        traverse(i.1, &mut inputs, None, deep);
+        traverse(i.1, &mut inputs, None, deep);
     }
     let entry_point_path = root.name.clone();
     let output_inputs = inputs
@@ -156,11 +156,11 @@ pub fn convert_node_to_metafile(root: Node, name: &str) -> Metafile {
     Metafile { inputs, outputs }
 }
 
-fn traverse(node: &Node, inputs: &mut HashMap<String, Input>, dir: Option<String>) {
+fn traverse(node: &Node, inputs: &mut HashMap<String, Input>, dir: Option<String>, deep: usize) {
     let full_path = node.name.clone();
     let dir: String = dir.map_or(full_path.clone(), |i| i + "/" + &full_path);
     // FIXME: Add parameters to filter nodes that are too deep and reduce the size of json
-    if dir.matches("/").count() >= 4 {
+    if dir.matches("/").count() >= deep {
         return;
     }
     let imports = node
@@ -185,6 +185,6 @@ fn traverse(node: &Node, inputs: &mut HashMap<String, Input>, dir: Option<String
     inputs.insert(dir.clone(), input);
 
     for child in node.nodes.values() {
-        traverse(child, inputs, Some(dir.clone()));
+        traverse(child, inputs, Some(dir.clone()), deep);
     }
 }
