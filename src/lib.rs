@@ -70,18 +70,12 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
     if let Ok(lock) = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string())) {
         for pkg in lock.packages {
             let name = pkg.name.as_str().replace("-", "_");
-            if !crate_names.contains(&name) {
-                continue;
-            }
             if !parent.contains_key(&name) {
                 parent.insert(name.clone(), name.clone());
             }
             for dep in pkg.dependencies {
                 let dep_name = dep.name.as_str().replace("-", "_");
                 parent.insert(dep_name.clone(), name.clone());
-                if !crate_names.contains(&dep_name) {
-                    continue;
-                }
             }
         }
     }
