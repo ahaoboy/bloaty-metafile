@@ -1,6 +1,6 @@
 use cargo_lock::Lockfile;
 use serde_metafile::{Import, Input, InputDetail, Metafile, Output};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub struct Node {
@@ -40,6 +40,10 @@ impl Node {
     }
 }
 
+fn symbol_is_crate(s: &str) -> bool {
+    s.contains("..")
+}
+
 pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
     let mut tree = Node {
         name: "__ROOT__".to_string(),
@@ -49,39 +53,47 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
         nodes: HashMap::new(),
     };
 
-    let mut parent: HashMap<String, String> = HashMap::new();
-    if let Ok(lock) = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string())) {
-        for pkg in lock.packages {
-            let name = pkg.name.as_str().replace("-", "_");
-            if !parent.contains_key(&name) {
-                parent.insert(name.clone(), name.clone());
-            }
-            for dep in pkg.dependencies {
-                let dep_name = dep.name.as_str().replace("-", "_");
-                parent.insert(dep_name.clone(), name.clone());
-            }
-        }
-    }
-
-    let root_crate = parent
-        .iter()
-        .find(|(k, _)| parent.get(&k.to_string()) == Some(k))
-        .map(|i| i.0);
-
+    let mut csv_lines = vec![];
+    let mut crate_names = HashSet::new();
     for line in csv.lines().skip(1) {
         let parts: Vec<&str> = line.split(',').collect();
         let section = parts[0];
         let symbols = parts[1];
         let vmsize: u64 = parts[2].parse().unwrap();
         let filesize: u64 = parts[3].parse().unwrap();
-        let mut symbols_parts: Vec<String> = symbols.split("::").map(|i| i.to_string()).collect();
-        // FIXME: filter crate name
-        if symbols_parts.len() == 1
-            || symbols_parts
-                .first()
-                .unwrap_or(&String::new())
-                .contains("..")
-        {
+        let symbols_parts: Vec<String> = symbols.split("::").map(|i| i.to_string()).collect();
+        crate_names.insert(symbols_parts[0].clone());
+        csv_lines.push((section, symbols_parts, vmsize, filesize));
+    }
+
+    let mut parent: HashMap<String, String> = HashMap::new();
+    if let Ok(lock) = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string())) {
+        for pkg in lock.packages {
+            let name = pkg.name.as_str().replace("-", "_");
+            if !crate_names.contains(&name) {
+                continue;
+            }
+            if !parent.contains_key(&name) {
+                parent.insert(name.clone(), name.clone());
+            }
+            for dep in pkg.dependencies {
+                let dep_name = dep.name.as_str().replace("-", "_");
+                parent.insert(dep_name.clone(), name.clone());
+                if !crate_names.contains(&dep_name) {
+                    continue;
+                }
+            }
+        }
+    }
+
+    // monorepo may have multiple roots
+    let root_crates: HashSet<_> = parent
+        .keys()
+        .filter(|i| parent.get(&i.to_string()) == Some(i))
+        .collect();
+
+    for (section, mut symbols_parts, vmsize, filesize) in csv_lines {
+        if symbols_parts.len() == 1 || symbol_is_crate(&symbols_parts[0]) {
             symbols_parts.insert(0, section.to_string());
             // FIXME: Put all unknown data into sections and distinguish them from crates
             symbols_parts.insert(0, "sections".to_string());
@@ -89,9 +101,10 @@ pub fn get_tree(csv: &str, lock: Option<String>) -> Node {
             // crate
             symbols_parts.insert(1, section.to_string());
             let mut prefix = vec![];
-            let mut top = &symbols_parts[0];
+            let crate_name = &symbols_parts[0];
+            let mut top = crate_name;
             loop {
-                if Some(&symbols_parts[0]) == (root_crate) {
+                if root_crates.contains(crate_name) {
                     break;
                 }
                 let Some(p) = parent.get(top) else {
