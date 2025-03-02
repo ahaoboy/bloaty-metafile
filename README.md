@@ -60,6 +60,8 @@ deep: 4, json: 6.7M
 deep: 8, json: 12M
 ![llrt-deep-8](https://github.com/user-attachments/assets/89a786ff-45e6-47b7-a931-edd59d1dff30)
 
+deep: 0(no limit), json: 80M
+![llrt-deep-0](https://github.com/user-attachments/assets/2657a334-ab28-42e5-b308-6e6b831a7a5f)
 
 ## windows
 
