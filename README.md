@@ -36,6 +36,10 @@ sections,symbols,vmsize,filesize
 
 https://esbuild.github.io/analyze/
 
+## Generate image from json
+
+You can use [metafile-image](https://github.com/ahaoboy/metafile-image) implemented by nodejs to generate json files into image format, without manually uploading and screenshots
+
 ## Usage
 
 ### lock file
