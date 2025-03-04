@@ -18,9 +18,17 @@ bloaty ./target/release/bloaty-metafile -d sections,symbols -n 0  --csv | bloaty
 In order for bloaty to parse symbol information properly, it is recommended to keep debug information and turn off lto and strip
 
 ```toml
+[profile.bloaty]
 debug = true
 lto = false
 strip = false
+inherits = 'release'
+```
+
+```bash
+cargo build --profile bloaty
+bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0  --csv > meta.csv
+bloaty-metafile meta.csv --deep=0 > meta.json
 ```
 
 ## csv format

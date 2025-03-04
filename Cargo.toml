@@ -16,3 +16,16 @@ cargo-lock = "10"
 clap = { version = "4.5", features = ["derive"] }
 csv = "1"
 serde="1"
+
+[profile.release]
+debug = false
+lto = true
+strip = true
+opt-level = "s"
+codegen-units = 1
+
+[profile.bloaty]
+debug = true
+lto = false
+strip = false
+inherits = 'release'

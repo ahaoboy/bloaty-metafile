@@ -45,15 +45,15 @@ jobs:
         uses: ahaoboy/easy-setup@v1
         with:
           url: https://github.com/ahaoboy/bloaty-build
-      - name: build --release
+      - name: build
         run: |
-          cargo build --release
+          cargo build --profile bloaty
       - name: bloaty csv
         run: |
-          bloaty ./target/release/bloaty-metafile -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
+          bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
       - name: bloaty-metafile.json
         run: |
-          cat bloaty-metafile-${{ matrix.os }}.csv | bloaty-metafile --name=bloaty-metafile --deep=0 > bloaty-metafile-${{ matrix.os }}.json
+          bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile --deep=0 > bloaty-metafile-${{ matrix.os }}.json
           ls -lh
       - name: Upload
         uses: actions/upload-artifact@v4
