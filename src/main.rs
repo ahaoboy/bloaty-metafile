@@ -12,11 +12,23 @@ pub struct Args {
 
     #[arg(short, long, default_value = "8")]
     pub deep: usize,
+
+    #[arg()]
+    pub path: Option<String>,
 }
 
 fn main() {
-    let Args { name, lock, deep } = Args::parse();
-    let csv = std::io::read_to_string(std::io::stdin()).expect("failed to read csv from stdio");
+    let Args {
+        name,
+        lock,
+        deep,
+        path,
+    } = Args::parse();
+    let csv = if let Some(path) = path {
+        std::fs::read_to_string(path).expect("failed to read csv file")
+    } else {
+        std::io::read_to_string(std::io::stdin()).expect("failed to read csv from stdio")
+    };
     let meta = from_csv(&csv, &name, lock, deep);
     let s = serde_json::to_string(&meta).expect("failed to serde metafile to json");
     println!("{s}",);

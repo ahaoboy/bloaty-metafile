@@ -8,6 +8,7 @@ cargo install --git https://github.com/ahaoboy/bloaty-metafile
 
 # https://github.com/google/bloaty/blob/main/doc/using.md
 bloaty ./bloaty -d sections,symbols -n 0  --csv | bloaty-metafile > meta.json
+bloaty-metafile meta.csv > meta.json
 
 bloaty ./target/release/bloaty-metafile -d sections,symbols -n 0  --csv | bloaty-metafile --name=bloaty-metafile --lock=Cargo.lock  > meta.json
 ```
