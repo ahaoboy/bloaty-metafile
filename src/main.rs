@@ -4,13 +4,13 @@ use clap::Parser;
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    #[arg(short, long, default_value = "Binary")]
+    #[arg(short, long, default_value = "BINARY")]
     pub name: String,
 
     #[arg(short, long)]
     pub lock: Option<String>,
 
-    #[arg(short, long, default_value = "8")]
+    #[arg(short, long, default_value = "0")]
     pub deep: usize,
 
     #[arg()]
