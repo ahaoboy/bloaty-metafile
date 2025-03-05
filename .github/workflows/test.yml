@@ -55,10 +55,11 @@ jobs:
         run: |
           bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
           ls -lh
+          npm i metafile-image -g
+          metafile-image bloaty-metafile-${{ matrix.os }}.json bloaty-metafile-${{ matrix.os }}.png
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: bloaty-metafile-${{ matrix.os }}
-          path: |
-            bloaty-metafile-${{ matrix.os }}.csv
-            bloaty-metafile-${{ matrix.os }}.json
+          path: bloaty-metafile-${{ matrix.os }}*
