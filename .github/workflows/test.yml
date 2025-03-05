@@ -3,7 +3,7 @@ name: Test
 permissions:
   contents: write
 
-on: [push]
+on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,7 +53,7 @@ jobs:
           bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
       - name: bloaty-metafile.json
         run: |
-          bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile --deep=0 > bloaty-metafile-${{ matrix.os }}.json
+          bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
           ls -lh
       - name: Upload
         uses: actions/upload-artifact@v4
