@@ -3,7 +3,7 @@ name: Release
 permissions:
   contents: write
 
-on: [push]
+on: [push, pull_request]
 
 defaults:
   run:

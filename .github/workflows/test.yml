@@ -3,7 +3,7 @@ name: Test
 permissions:
   contents: write
 
-on: [push]
+on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
