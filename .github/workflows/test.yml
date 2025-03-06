@@ -51,11 +51,9 @@ jobs:
       - name: build
         run: |
           cargo build --profile bloaty
-      - name: bloaty csv
-        run: |
-          bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
       - name: bloaty-metafile.json
         run: |
+          bloaty "$(which bloaty-metafile)" -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
           bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
           ls -lh
           npm i metafile-image -g
@@ -63,10 +61,9 @@ jobs:
       - name: deno.json
         run: |
           curl -L -o deno.lock  https://github.com/denoland/deno/raw/refs/heads/main/Cargo.lock
-          bloaty "$(which deno)" -d sections,symbols -n 0 --csv > deno-${{ matrix.os }}.csv
+          bloaty "$(which deno)" -d sections,symbols -n 10000 --csv > deno-${{ matrix.os }}.csv
           bloaty-metafile deno-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-${{ matrix.os }}.json
           ls -lh
-          npm i metafile-image -g
           metafile-image deno-${{ matrix.os }}.json deno-${{ matrix.os }}.png
 
       - name: Upload
