@@ -57,14 +57,18 @@ jobs:
           bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
           ls -lh
           npm i metafile-image -g
+          metafile-image --version
           metafile-image bloaty-metafile-${{ matrix.os }}.json bloaty-metafile-${{ matrix.os }}.png
       - name: deno.json
         run: |
           curl -L -o deno.lock  https://github.com/denoland/deno/raw/refs/heads/main/Cargo.lock
-          bloaty "$(which deno)" -d sections,symbols -n 10000 --csv > deno-${{ matrix.os }}.csv
-          bloaty-metafile deno-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-${{ matrix.os }}.json
+
+          # 100mb
+          bloaty "$(which deno)" -d sections,symbols -n 0 --csv > deno-skip-${{ matrix.os }}.csv
+          # 400mb
+          bloaty-metafile deno-skip-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-skip-${{ matrix.os }}.json
           ls -lh
-          metafile-image deno-${{ matrix.os }}.json deno-${{ matrix.os }}.png
+          metafile-image deno-skip-${{ matrix.os }}.json deno-${{ matrix.os }}.png
 
       - name: Upload
         uses: actions/upload-artifact@v4
