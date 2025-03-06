@@ -44,7 +44,10 @@ jobs:
       - name: install easy-install
         uses: ahaoboy/easy-setup@v1
         with:
-          url: https://github.com/ahaoboy/bloaty-build
+          url: |-
+            https://github.com/denoland/deno
+            https://github.com/ahaoboy/bloaty-build
+
       - name: build
         run: |
           cargo build --profile bloaty
@@ -57,9 +60,19 @@ jobs:
           ls -lh
           npm i metafile-image -g
           metafile-image bloaty-metafile-${{ matrix.os }}.json bloaty-metafile-${{ matrix.os }}.png
+      - name: deno.json
+        run: |
+          curl -L -o deno.lock  https://github.com/denoland/deno/raw/refs/heads/main/Cargo.lock
+          bloaty "$(which deno)" -d sections,symbols -n 0 --csv > deno-${{ matrix.os }}.csv
+          bloaty-metafile deno-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-${{ matrix.os }}.json
+          ls -lh
+          npm i metafile-image -g
+          metafile-image deno-${{ matrix.os }}.json deno-${{ matrix.os }}.png
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: bloaty-metafile-${{ matrix.os }}
-          path: bloaty-metafile-${{ matrix.os }}*
+          path: |
+            bloaty-metafile-${{ matrix.os }}*
+            deno-${{ matrix.os }}*
