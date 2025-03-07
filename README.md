@@ -76,6 +76,15 @@ deep: 8, json: 12M
 deep: 0, json: 80M
 ![llrt-deep-0](https://github.com/user-attachments/assets/b2cbf935-340e-4dbd-8ca3-191340c9ae35)
 
+
+## Conversion rules
+
+The symbol `.text,easy_install::install::artifact` will be converted to `easy_install/.text/install/artifact`.
+
+Additionally, if symbol ends with `.map`, to prevent the esbuild analyzer from treating it as a JavaScript sourcemap file, the suffix will be converted to `.map_`.
+
+If symbol is empty, it will be added to the `UNKNOWN` section.
+
 ## windows
 
 bloaty: PE doesn't support this data source
