@@ -13,45 +13,45 @@ impl Packages {
     pub fn new(lock: Lockfile, records: &[SectionRecord]) -> Self {
         let mut dependencies = HashMap::new();
         let mut parent = HashMap::new();
-        let crates: HashSet<_> = records
+        let crates: HashSet<String> = records
             .iter()
-            .flat_map(|i| get_crate_name(&i.symbols))
-            .map(|i| i.0)
+            .filter_map(|i| get_crate_name(&i.symbols))
+            .map(|(name, _)| name)
             .collect();
+
         for pkg in lock.packages {
             let name = pkg.name.as_str().replace("-", "_");
-            if !parent.contains_key(&name) {
-                parent.insert(name.clone(), name.clone());
-            }
-            for dep in &pkg.dependencies {
-                let dep_name = dep.name.as_str().replace("-", "_");
-                parent.insert(dep_name.clone(), name.clone());
-            }
+            // Some packages in llrt have no code, but we need these empty packages to maintain the dependency tree
+            // So we cannot use crates to filter them.
+            parent.entry(name.clone()).or_insert(name.clone());
 
-            let deps: HashSet<String> = HashSet::from_iter(
-                pkg.dependencies
-                    .into_iter()
-                    .map(|i| i.name.as_str().replace("-", "_")),
-            );
+            let deps: HashSet<String> = pkg
+                .dependencies
+                .iter()
+                .map(|dep| dep.name.as_str().replace("-", "_"))
+                .collect();
+            for dep in &deps {
+                parent.insert(dep.clone(), name.clone());
+            }
 
             dependencies.insert(name, deps);
         }
 
-        let roots: Vec<_> = parent
-            .keys()
-            .filter(|i| parent.get(*i) == Some(i))
-            .cloned()
-            .collect::<Vec<_>>();
-        let nodes = parent
-            .keys()
-            .filter(|i| roots.contains(parent.get(*i).unwrap()))
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(root) = roots.iter().find(|i| crates.contains(*i)) {
-            for i in nodes {
-                parent.insert(i, root.to_string());
+        let roots: Vec<String> = parent
+            .iter()
+            .filter(|(k, v)| k == v)
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        // Since the order is random, and the union-find set can only have one parent, all nodes pointing to other roots need to be pointed to the binary root.
+        if let Some(root) = roots.iter().find(|r| crates.contains(*r)) {
+            for (_, p) in parent.iter_mut() {
+                if roots.contains(p) && p != root {
+                    *p = root.clone();
+                }
             }
         }
+
         Packages {
             dependencies,
             parent,

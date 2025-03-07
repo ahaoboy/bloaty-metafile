@@ -14,7 +14,6 @@ pub struct Node {
     pub filesize: u64,
     pub total_vmsize: u64,
     pub total_filesize: u64,
-    // pub count: u64,
     pub nodes: HashMap<String, Node>,
 }
 
@@ -37,7 +36,6 @@ impl Tree {
                 name: ROOT_NAME.to_string(),
                 vmsize: 0,
                 filesize: 0,
-                // count: 0,
                 nodes: HashMap::new(),
                 total_filesize: 0,
                 total_vmsize: 0,
@@ -45,7 +43,6 @@ impl Tree {
         };
 
         let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-
         let records: Vec<_> = rdr
             .deserialize::<SectionRecord>()
             .flat_map(|i| i.ok())
@@ -54,28 +51,16 @@ impl Tree {
             .map(|lock| Packages::new(lock, &records))
             .unwrap_or_default();
 
-        let mut records_paths = vec![];
-        for SectionRecord {
-            sections,
-            symbols,
-            vmsize,
-            filesize,
-        } in records
-        {
-            // symbols maybe empty
-            let sym = if symbols.is_empty() {
+        for record in records {
+            let sym = if record.symbols.is_empty() {
                 UNKNOWN_NAME.to_string()
             } else {
-                symbols
+                record.symbols
             };
-            let path = get_path_from_record(sym, sections, &packages);
-            records_paths.push(path.join("/"));
-            tree.add_path(&path, vmsize, filesize);
+            let path = get_path_from_record(sym, record.sections, &packages);
+            tree.add_path(&path, record.vmsize, record.filesize);
         }
 
-        // let mut cur = vec![];
-        // let mut paths = vec![];
-        // Tree::calc_size(&mut tree.root, &mut cur, &mut paths);
         tree
     }
 
@@ -83,8 +68,7 @@ impl Tree {
         let root = &self.root;
         let mut inputs = HashMap::new();
         for i in root.nodes.values() {
-            self.traverse(i, &mut inputs, None, deep);
-            self.traverse(i, &mut inputs, None, deep);
+            i.traverse(&mut inputs, None, deep);
         }
         let output_inputs: HashMap<_, _> = inputs
             .iter()
@@ -109,19 +93,16 @@ impl Tree {
         Metafile { inputs, outputs }
     }
 
-    fn add_path(&mut self, path: &[String], vmsize: u64, filesize: u64) -> &Node {
+    fn add_path(&mut self, path: &[String], vmsize: u64, filesize: u64) {
         let mut current = &mut self.root;
-        for i in 0..path.len() {
-            let part = path[i].clone();
+        for (i, part) in path.iter().enumerate() {
             current.total_vmsize += vmsize;
             current.total_filesize += filesize;
-            // current.count += 1;
             if i == path.len() - 1 {
-                let n = current.nodes.entry(part.to_string()).or_insert(Node {
-                    name: part.to_string(),
+                let n = current.nodes.entry(part.clone()).or_insert(Node {
+                    name: part.clone(),
                     vmsize,
                     filesize,
-                    // count: 1,
                     nodes: HashMap::new(),
                     total_filesize: 0,
                     total_vmsize: 0,
@@ -129,65 +110,32 @@ impl Tree {
                 n.vmsize = vmsize;
                 n.filesize = filesize;
             } else {
-                current = current.nodes.entry(part.to_string()).or_insert(Node {
-                    name: part.to_string(),
+                current = current.nodes.entry(part.clone()).or_insert(Node {
+                    name: part.clone(),
                     vmsize: 0,
                     filesize: 0,
-                    // count: 0,
                     nodes: HashMap::new(),
                     total_filesize: 0,
                     total_vmsize: 0,
                 });
             }
         }
-
-        current
     }
+}
 
-    // fn calc_size(tree: &mut Node, cur: &mut Vec<String>, paths: &mut Vec<String>) {
-    //     for i in tree.nodes.values_mut() {
-    //         cur.push(i.name.clone());
-    //         Tree::calc_size(i, cur, paths);
-    //         cur.pop();
-    //     }
-    //     // if tree.filesize > 0 || tree.vmsize > 0{
-    //     paths.push(cur.join("/"));
-    //     // }
-
-    //     let count = tree.count + tree.nodes.values().fold(0, |pre, cur| pre + cur.count);
-    //     let filesize = tree.total_filesize
-    //         + tree
-    //             .nodes
-    //             .values()
-    //             .fold(0, |pre, cur| pre + cur.filesize + cur.total_filesize);
-    //     let vmsize = tree.total_vmsize
-    //         + tree
-    //             .nodes
-    //             .values()
-    //             .fold(0, |pre, cur| pre + cur.vmsize + cur.total_vmsize);
-    //     tree.total_filesize = filesize;
-    //     tree.total_vmsize = vmsize;
-    //     tree.count = count;
-    // }
-
-    fn traverse(
-        &self,
-        node: &Node,
-        inputs: &mut HashMap<String, Input>,
-        dir: Option<String>,
-        deep: usize,
-    ) {
-        let full_path = node.name.clone();
+impl Node {
+    fn traverse(&self, inputs: &mut HashMap<String, Input>, dir: Option<String>, deep: usize) {
+        let full_path = self.name.clone();
         let dir: String = dir.map_or(full_path.clone(), |i| i + "/" + &full_path);
         if deep != 0 && dir.matches("/").count() >= deep {
             return;
         }
 
-        let imports = node
+        let imports = self
             .nodes
             .values()
             .map(|child| Import {
-                path: dir.clone() + "/" + &child.name + "__",
+                path: dir.clone() + "/" + &child.name,
                 kind: None,
                 external: false,
                 original: None,
@@ -195,14 +143,14 @@ impl Tree {
             })
             .collect();
         let input = Input {
-            bytes: node.filesize,
+            bytes: self.filesize,
             imports,
             format: None,
             with: None,
         };
         inputs.insert(dir.clone(), input);
-        for child in node.nodes.values() {
-            self.traverse(child, inputs, Some(dir.clone()), deep);
+        for child in self.nodes.values() {
+            child.traverse(inputs, Some(dir.clone()), deep);
         }
     }
 }
