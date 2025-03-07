@@ -62,8 +62,27 @@ impl Packages {
         self.parent.get(id).is_some_and(|i| i == id)
     }
 
-    fn is_direct_dep(&self, id: &str, dep: &str) -> bool {
-        self.dependencies.get(id).is_some_and(|i| i.contains(dep))
+    // Find the parent node closest to the root node.
+    pub fn get_short_parent(&self, id: &str) -> Option<String> {
+        let mut path = vec![];
+        let mut cur = id;
+        while let Some(p) = self.parent.get(cur) {
+            path.push(p);
+            if p == cur {
+                break;
+            }
+            cur = p;
+        }
+        for i in path.iter().rev() {
+            if self
+                .dependencies
+                .get(*i)
+                .is_some_and(|deps| deps.contains(id))
+            {
+                return Some(i.to_string());
+            }
+        }
+        self.parent.get(id).cloned()
     }
 
     pub fn get_path(&self, id: &str) -> Vec<String> {
@@ -71,23 +90,13 @@ impl Packages {
             return vec![];
         }
         let mut path = vec![];
-        let mut cur = &id.to_string();
-        while let Some(parent) = self.parent.get(cur) {
+        let mut cur = id.to_string();
+        while let Some(parent) = self.get_short_parent(&cur) {
             path.push(cur.clone());
             if parent == cur {
                 break;
             }
             cur = parent;
-        }
-
-        let mut post_path = vec![];
-        for i in path.iter().rev() {
-            if self.is_direct_dep(i, id) {
-                let mut short = vec![id.to_string(), i.to_string()];
-                short.extend(post_path.into_iter().rev());
-                return short;
-            }
-            post_path.push(i.clone());
         }
         path
     }
