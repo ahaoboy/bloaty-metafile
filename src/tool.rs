@@ -1,71 +1,61 @@
-use cargo_lock::Lockfile;
-use std::collections::{HashMap, HashSet};
+use crate::packages::Packages;
 
-#[derive(Debug, Default)]
-pub struct Packages {
-    dependencies: HashMap<String, HashSet<String>>,
-    parent: HashMap<String, String>,
+pub const ROOT_NAME: &str = "ROOT";
+pub const UNKNOWN_NAME: &str = "UNKNOWN";
+pub const SECTIONS_NAME: &str = "SECTIONS";
+
+pub fn symbol_is_crate(s: &str) -> bool {
+    if ["..", " "].iter().any(|i| s.contains(i)) {
+        return false;
+    }
+    !s.starts_with('[')
 }
 
-impl Packages {
-    pub fn from_lock(lock: Lockfile) -> Self {
-        let mut dependencies = HashMap::new();
-        let mut parent = HashMap::new();
-        for pkg in lock.packages {
-            let name = pkg.name.as_str().replace("-", "_");
-            if !parent.contains_key(&name) {
-                parent.insert(name.clone(), name.clone());
-            }
-            for dep in &pkg.dependencies {
-                let dep_name = dep.name.as_str().replace("-", "_");
-                parent.insert(dep_name.clone(), name.clone());
-            }
+pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
+    let symbols_parts: Vec<String> = symbols
+        .trim_end_matches(":")
+        .split("::")
+        .map(|i| i.to_string())
+        .collect();
+    if symbols_parts.len() == 1 || !symbol_is_crate(&symbols_parts[0]) {
+        return None;
+    }
+    Some((symbols_parts[0].clone(), symbols_parts.clone()))
+}
 
-            let deps: HashSet<String> = HashSet::from_iter(
-                pkg.dependencies
-                    .into_iter()
-                    .map(|i| i.name.as_str().replace("-", "_")),
-            );
-
-            dependencies.insert(name, deps);
-        }
-        Packages {
-            dependencies,
-            parent,
+pub fn get_path_from_record(symbols: String, sections: String, packages: &Packages) -> Vec<String> {
+    match get_crate_name(&symbols) {
+        None => vec![SECTIONS_NAME.to_string(), sections.to_string()]
+            .into_iter()
+            .chain(symbols.trim_end_matches(':').split("::").map(String::from))
+            .collect(),
+        Some((crate_name, symbols_parts)) => {
+            // crate
+            // .text,llrt_utils::clone::structured_clone -> llrt/llrt_utils/.text/clone/structured_clone
+            let mut prefix = packages.get_path(&crate_name);
+            prefix.reverse();
+            prefix.push(crate_name.to_string());
+            prefix.push(sections.to_string());
+            prefix.extend_from_slice(&symbols_parts[1..]);
+            prefix
         }
     }
+}
 
-    pub fn is_root(&self, id: &str) -> bool {
-        self.parent.get(id).is_some_and(|i| i == id)
-    }
+#[cfg(test)]
+mod test {
+    use crate::tool::symbol_is_crate;
 
-    fn is_direct_dep(&self, id: &str, dep: &str) -> bool {
-        self.dependencies.get(id).is_some_and(|i| i.contains(dep))
-    }
-
-    pub fn get_path(&self, id: &str) -> Vec<String> {
-        if self.is_root(id) {
-            return vec![];
+    #[test]
+    fn test_symbol_is_crate() {
+        for (a, b) in [
+            ("[16482 Others]", false),
+            (
+                "_$LT$alloc..string..String$u20$as$u20$core..fmt..Write$GT$",
+                false,
+            ),
+        ] {
+            assert_eq!(symbol_is_crate(a), b);
         }
-        let mut path = vec![];
-        let mut cur = &id.to_string();
-        while let Some(parent) = self.parent.get(cur) {
-            path.push(cur.clone());
-            if parent == cur {
-                break;
-            }
-            cur = parent;
-        }
-
-        let mut post_path = vec![];
-        for i in path.iter().rev() {
-            if self.is_direct_dep(i, id) {
-                let mut short = vec![id.to_string(), i.to_string()];
-                short.extend(post_path.into_iter().rev());
-                return short;
-            }
-            post_path.push(i.clone());
-        }
-        path
     }
 }
