@@ -67,18 +67,18 @@ impl Packages {
         let mut path = vec![];
         let mut cur = id;
         while let Some(p) = self.parent.get(cur) {
-            path.push(p);
             if p == cur {
                 break;
             }
+            path.push(p);
             cur = p;
         }
         for i in path.iter().rev() {
-            if self
+            let is_direct_dep = self
                 .dependencies
                 .get(*i)
-                .is_some_and(|deps| deps.contains(id))
-            {
+                .is_some_and(|deps| deps.contains(id));
+            if is_direct_dep {
                 return Some(i.to_string());
             }
         }
@@ -86,16 +86,16 @@ impl Packages {
     }
 
     pub fn get_path(&self, id: &str) -> Vec<String> {
+        let mut path = vec![id.to_string()];
         if self.is_root(id) {
-            return vec![];
+            return path;
         }
-        let mut path = vec![];
         let mut cur = id.to_string();
         while let Some(parent) = self.get_short_parent(&cur) {
-            path.push(cur.clone());
             if parent == cur {
                 break;
             }
+            path.push(parent.clone());
             cur = parent;
         }
         path
