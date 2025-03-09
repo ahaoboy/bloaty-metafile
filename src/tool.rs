@@ -8,7 +8,11 @@ pub fn symbol_is_crate(s: &str) -> bool {
     if ["..", " "].iter().any(|i| s.contains(i)) {
         return false;
     }
-    !s.starts_with('[')
+
+    // FIXME: Maybe there are other cases
+    !["[", "std::", "core::", "alloc::"]
+        .iter()
+        .any(|i| s.starts_with(i))
 }
 
 pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
