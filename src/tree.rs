@@ -1,6 +1,6 @@
 use crate::{
     packages::Packages,
-    tool::{ROOT_NAME, UNKNOWN_NAME, get_path_from_record},
+    tool::{ROOT_NAME, SECTIONS_NAME, UNKNOWN_NAME, get_path_from_record},
 };
 use cargo_lock::Lockfile;
 use serde::Deserialize;
@@ -30,7 +30,7 @@ pub struct Tree {
 }
 
 impl Tree {
-    pub fn new(csv: &str, lock: Option<String>) -> Tree {
+    pub fn new(csv: &str, lock: Option<String>, no_sections: bool) -> Tree {
         let mut tree = Tree {
             root: Node {
                 name: ROOT_NAME.to_string(),
@@ -58,6 +58,9 @@ impl Tree {
                 record.symbols
             };
             let path = get_path_from_record(sym, record.sections, &packages);
+            if no_sections && path[0] == SECTIONS_NAME {
+                continue;
+            }
             tree.add_path(&path, record.vmsize, record.filesize);
         }
 
@@ -171,7 +174,7 @@ sections,symbols,vmsize,filesize
 .text,[1843 Others],1086372,1086372
 "#,
         ] {
-            let tree = Tree::new(csv, None);
+            let tree = Tree::new(csv, None, false);
             assert_eq!(tree.root.nodes.len(), 1)
         }
     }

@@ -77,6 +77,13 @@ deep: 0, json: 80M
 ![llrt-deep-0](https://github.com/user-attachments/assets/b2cbf935-340e-4dbd-8ca3-191340c9ae35)
 
 
+### no-sections
+
+Filter out SECTIONS that failed to count crates, and only display the recognized crate size usage.
+
+The default value of no-sections is false
+
+
 ## Conversion rules
 
 The symbol `.text,easy_install::install::artifact` will be converted to `easy_install/.text/install/artifact`.
