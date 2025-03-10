@@ -1,12 +1,11 @@
-use cargo_lock::Lockfile;
-use std::collections::{HashMap, HashSet};
-
 use crate::{tool::get_crate_name, tree::SectionRecord};
+use cargo_lock::Lockfile;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Default, Clone)]
 pub struct Packages {
     dependencies: HashMap<String, HashSet<String>>,
-    parent: HashMap<String, String>,
+    parent: HashMap<String, HashSet<String>>,
 }
 
 impl Packages {
@@ -23,7 +22,7 @@ impl Packages {
             let name = pkg.name.as_str().replace("-", "_");
             // Some packages in llrt have no code, but we need these empty packages to maintain the dependency tree
             // So we cannot use crates to filter them.
-            parent.entry(name.clone()).or_insert(name.clone());
+            parent.entry(name.clone()).or_insert(HashSet::new());
 
             let deps: HashSet<String> = pkg
                 .dependencies
@@ -31,24 +30,51 @@ impl Packages {
                 .map(|dep| dep.name.as_str().replace("-", "_"))
                 .collect();
             for dep in &deps {
-                parent.insert(dep.clone(), name.clone());
+                parent
+                    .entry(dep.clone())
+                    .or_insert(HashSet::new())
+                    .insert(name.clone());
             }
 
             dependencies.insert(name, deps);
         }
 
-        let roots: Vec<String> = parent
-            .iter()
-            .filter(|(k, v)| k == v)
-            .map(|(k, _)| k.clone())
-            .collect();
+        let mut removed_roots = HashSet::new();
+        loop {
+            let roots: HashSet<String> = parent
+                .iter()
+                .filter(|(k, v)| v.is_empty() && !removed_roots.contains(*k))
+                .map(|(k, _)| k.clone())
+                .collect();
+            if roots.is_empty() {
+                break;
+            }
 
-        // Since the order is random, and the union-find set can only have one parent, all nodes pointing to other roots need to be pointed to the binary root.
-        if let Some(root) = roots.iter().find(|r| crates.contains(*r)) {
-            for (_, p) in parent.iter_mut() {
-                if roots.contains(p) && p != root {
-                    *p = root.clone();
+            if let Some(root) = roots.iter().find(|r| crates.contains(*r)) {
+                // find the real root, all nodes pointing to other roots need to be pointed to this root.
+                for p in parent.values_mut() {
+                    let common: HashSet<_> = p.intersection(&roots).cloned().collect();
+                    if common.is_empty() {
+                        continue;
+                    }
+                    for i in common {
+                        p.remove(&i);
+                    }
+                    p.insert(root.clone());
                 }
+                break;
+            } else {
+                // remove all fake roots in tree
+                for p in parent.values_mut() {
+                    let common: HashSet<_> = p.intersection(&roots).cloned().collect();
+                    for i in common {
+                        p.remove(&i);
+                    }
+                }
+            }
+
+            for i in &roots {
+                removed_roots.insert(i.clone());
             }
         }
 
@@ -59,30 +85,40 @@ impl Packages {
     }
 
     pub fn is_root(&self, id: &str) -> bool {
-        self.parent.get(id).is_some_and(|i| i == id)
+        self.parent.get(id).is_some_and(|i| i.is_empty())
     }
 
     // Find the parent node closest to the root node.
     pub fn get_short_parent(&self, id: &str) -> Option<String> {
-        let mut path = vec![];
-        let mut cur = id;
-        while let Some(p) = self.parent.get(cur) {
-            if p == cur {
-                break;
+        let mut q = VecDeque::from_iter(
+            self.parent
+                .get(id)?
+                .iter()
+                .map(|i| (vec![i.clone()], self.is_root(i))),
+        );
+        while let Some((path, end)) = q.pop_front() {
+            if end {
+                for i in path.iter().rev() {
+                    let is_direct_dep = self
+                        .dependencies
+                        .get(i)
+                        .is_some_and(|deps| deps.contains(id));
+                    if is_direct_dep {
+                        return Some(i.to_string());
+                    }
+                }
+                continue;
             }
-            path.push(p);
-            cur = p;
-        }
-        for i in path.iter().rev() {
-            let is_direct_dep = self
-                .dependencies
-                .get(*i)
-                .is_some_and(|deps| deps.contains(id));
-            if is_direct_dep {
-                return Some(i.to_string());
+
+            if let Some(p) = path.last().and_then(|i| self.parent.get(i)) {
+                for i in p {
+                    let mut next = path.clone();
+                    next.push(i.to_string());
+                    q.push_back((next, self.is_root(i)));
+                }
             }
         }
-        self.parent.get(id).cloned()
+        None
     }
 
     pub fn get_path(&self, id: &str) -> Vec<String> {
