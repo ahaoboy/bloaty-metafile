@@ -1,133 +1,116 @@
 use crate::{tool::get_crate_name, tree::SectionRecord};
 use cargo_lock::Lockfile;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
+
+fn find_shortest_parents(
+    parents: &HashMap<String, HashSet<String>>,
+    dependencies: &HashMap<String, HashSet<String>>,
+) -> HashMap<String, String> {
+    let mut cache: HashMap<String, (usize, usize)> = HashMap::new();
+    fn compute_shortest_path(
+        start: &str,
+        parents: &HashMap<String, HashSet<String>>,
+        cache: &mut HashMap<String, (usize, usize)>,
+    ) -> (usize, usize) {
+        if let Some(&cached) = cache.get(start) {
+            return cached;
+        }
+        let mut min_path = (0, 0);
+        if let Some(parent_list) = parents.get(start) {
+            for parent in parent_list {
+                let (path_len, name_len) = compute_shortest_path(parent, parents, cache);
+                let current_path = (path_len + 1, name_len + parent.len());
+                if min_path == (0, 0) || current_path < min_path {
+                    min_path = current_path;
+                }
+            }
+        }
+        cache.insert(start.to_string(), min_path);
+        min_path
+    }
+
+    let parent_map: HashMap<String, String> = parents
+        .keys()
+        .map(|name| {
+            let shortest_parent = parents[name]
+                .iter()
+                .filter(|p| dependencies[*p].contains(name))
+                .min_by(|&a, &b| {
+                    let a_path = compute_shortest_path(a, parents, &mut cache);
+                    let b_path = compute_shortest_path(b, parents, &mut cache);
+                    a_path.cmp(&b_path)
+                })
+                .unwrap_or(name);
+            (name.clone(), shortest_parent.clone())
+        })
+        .collect();
+
+    parent_map
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct Packages {
-    dependencies: HashMap<String, HashSet<String>>,
-    parent: HashMap<String, HashSet<String>>,
+    parent: HashMap<String, String>,
 }
 
 impl Packages {
     pub fn new(lock: Lockfile, records: &[SectionRecord]) -> Self {
-        let mut dependencies = HashMap::new();
-        let mut parent = HashMap::new();
         let crates: HashSet<String> = records
             .iter()
             .filter_map(|i| get_crate_name(&i.symbols))
             .map(|(name, _)| name)
             .collect();
 
-        for pkg in lock.packages {
-            let name = pkg.name.as_str().replace("-", "_");
-            // Some packages in llrt have no code, but we need these empty packages to maintain the dependency tree
-            // So we cannot use crates to filter them.
-            parent.entry(name.clone()).or_insert(HashSet::new());
+        let (mut parents, dependencies) = lock.packages.into_iter().fold(
+            (HashMap::new(), HashMap::new()),
+            |(mut parents, mut deps), pkg| {
+                let name = pkg.name.as_str().replace("-", "_");
+                parents.entry(name.clone()).or_insert_with(HashSet::new);
 
-            let deps: HashSet<String> = pkg
-                .dependencies
-                .iter()
-                .map(|dep| dep.name.as_str().replace("-", "_"))
-                .collect();
-            for dep in &deps {
-                parent
-                    .entry(dep.clone())
-                    .or_insert(HashSet::new())
-                    .insert(name.clone());
+                let pkg_deps: HashSet<String> = pkg
+                    .dependencies
+                    .iter()
+                    .map(|dep| dep.name.as_str().replace("-", "_"))
+                    .collect();
+
+                for dep in &pkg_deps {
+                    parents
+                        .entry(dep.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(name.clone());
+                }
+                deps.insert(name, pkg_deps);
+                (parents, deps)
+            },
+        );
+
+        let mut roots = HashSet::new();
+        while let Some(root) = parents
+            .iter()
+            .find_map(|(k, v)| v.is_empty().then(|| k.clone()))
+        {
+            let is_real_root = crates.contains(&root);
+            parents.remove(&root);
+            if is_real_root {
+                roots.insert(root.clone());
             }
-
-            dependencies.insert(name, deps);
-        }
-
-        let mut removed_roots = HashSet::new();
-        loop {
-            let roots: HashSet<String> = parent
-                .iter()
-                .filter(|(k, v)| v.is_empty() && !removed_roots.contains(*k))
-                .map(|(k, _)| k.clone())
-                .collect();
-            if roots.is_empty() {
-                break;
-            }
-
-            if let Some(root) = roots.iter().find(|r| crates.contains(*r)) {
-                // find the real root, all nodes pointing to other roots need to be pointed to this root.
-                for p in parent.values_mut() {
-                    let common: HashSet<_> = p.intersection(&roots).cloned().collect();
-                    if common.is_empty() {
-                        continue;
-                    }
-                    for i in common {
-                        p.remove(&i);
-                    }
+            for p in parents.values_mut() {
+                if p.remove(&root) && is_real_root {
                     p.insert(root.clone());
                 }
-                break;
-            } else {
-                // remove all fake roots in tree
-                for p in parent.values_mut() {
-                    let common: HashSet<_> = p.intersection(&roots).cloned().collect();
-                    for i in common {
-                        p.remove(&i);
-                    }
-                }
-            }
-
-            for i in &roots {
-                removed_roots.insert(i.clone());
             }
         }
-
-        Packages {
-            dependencies,
-            parent,
+        for i in roots {
+            parents.insert(i, HashSet::new());
         }
-    }
-
-    pub fn is_root(&self, id: &str) -> bool {
-        self.parent.get(id).is_some_and(|i| i.is_empty())
-    }
-
-    // Find the parent node closest to the root node.
-    pub fn get_short_parent(&self, id: &str) -> Option<String> {
-        let mut q = VecDeque::from_iter(
-            self.parent
-                .get(id)?
-                .iter()
-                .map(|i| (vec![i.clone()], self.is_root(i))),
-        );
-        while let Some((path, end)) = q.pop_front() {
-            if end {
-                for i in path.iter().rev() {
-                    let is_direct_dep = self
-                        .dependencies
-                        .get(i)
-                        .is_some_and(|deps| deps.contains(id));
-                    if is_direct_dep {
-                        return Some(i.to_string());
-                    }
-                }
-                continue;
-            }
-
-            if let Some(p) = path.last().and_then(|i| self.parent.get(i)) {
-                for i in p {
-                    let mut next = path.clone();
-                    next.push(i.to_string());
-                    q.push_back((next, self.is_root(i)));
-                }
-            }
-        }
-        None
+        let parent = find_shortest_parents(&parents, &dependencies);
+        Self { parent }
     }
 
     pub fn get_path(&self, id: &str) -> Vec<String> {
         let mut path = vec![id.to_string()];
-        if self.is_root(id) {
-            return path;
-        }
-        let mut cur = id.to_string();
-        while let Some(parent) = self.get_short_parent(&cur) {
+        let mut cur = id;
+        while let Some(parent) = self.parent.get(cur) {
             if parent == cur {
                 break;
             }
