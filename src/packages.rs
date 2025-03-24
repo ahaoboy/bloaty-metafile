@@ -15,16 +15,17 @@ fn find_shortest_parents(
         if let Some(&cached) = cache.get(start) {
             return cached;
         }
-        let mut min_path = (0, 0);
-        if let Some(parent_list) = parents.get(start) {
-            for parent in parent_list {
+        let mut min_path = None;
+        if let Some(nodes) = parents.get(start) {
+            for parent in nodes {
                 let (path_len, name_len) = compute_shortest_path(parent, parents, cache);
-                let current_path = (path_len + 1, name_len + parent.len());
-                if min_path == (0, 0) || current_path < min_path {
-                    min_path = current_path;
+                let current_path = (path_len + 1, name_len + start.len());
+                if min_path.is_none() || current_path < min_path.unwrap() {
+                    min_path = Some(current_path);
                 }
             }
         }
+        let min_path = min_path.unwrap_or((0, 0));
         cache.insert(start.to_string(), min_path);
         min_path
     }
@@ -38,6 +39,9 @@ fn find_shortest_parents(
                 .min_by(|&a, &b| {
                     let a_path = compute_shortest_path(a, parents, &mut cache);
                     let b_path = compute_shortest_path(b, parents, &mut cache);
+                    if name == "tokio" {
+                        eprintln!("{:?} {:?}", a_path, b_path);
+                    }
                     a_path.cmp(&b_path)
                 })
                 .unwrap_or(name);
@@ -104,6 +108,9 @@ impl Packages {
             parents.insert(i, HashSet::new());
         }
         let parent = find_shortest_parents(&parents, &dependencies);
+
+        eprintln!("{:?}", parent.get("tokio"));
+        // eprintln!("{}", serde_json::to_string(&parent).unwrap());
         Self { parent }
     }
 
