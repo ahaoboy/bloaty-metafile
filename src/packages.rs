@@ -105,9 +105,6 @@ impl Packages {
             parents.insert(i, HashSet::new());
         }
         let parent = find_shortest_parents(&parents, &dependencies);
-
-        eprintln!("{:?}", parent.get("tokio"));
-        // eprintln!("{}", serde_json::to_string(&parent).unwrap());
         Self { parent }
     }
 
