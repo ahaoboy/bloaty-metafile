@@ -35,5 +35,5 @@ fn main() {
     };
     let meta = from_csv(&csv, &name, lock, deep, no_sections);
     let s = serde_json::to_string(&meta).expect("failed to serde metafile to json");
-    println!("{s}",);
+    println!("{s}");
 }
