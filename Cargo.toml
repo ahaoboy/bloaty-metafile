@@ -1,6 +1,6 @@
 [package]
 name = "bloaty-metafile"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "MIT"
 description = "bloaty-metafile"
@@ -13,7 +13,7 @@ include = ["/src", "/Cargo.toml", "/README.md"]
 serde-metafile = "0.1"
 serde_json = "1"
 cargo-lock = "10"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 csv = "1"
 serde = "1"
 
