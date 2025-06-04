@@ -27,9 +27,11 @@ inherits = 'release'
 
 ```bash
 cargo build --profile bloaty
+
 bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv > meta.csv
-bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv --no-sections > meta.csv
+
 bloaty-metafile meta.csv > meta.json
+bloaty-metafile meta.csv --no-sections > meta.json
 ```
 
 ## csv format
