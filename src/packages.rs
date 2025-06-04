@@ -75,6 +75,10 @@ impl Packages {
                     .collect();
 
                 for dep in &pkg_deps {
+                    // Avoid self-dependence
+                    if dep == &name {
+                        continue;
+                    }
                     parents
                         .entry(dep.clone())
                         .or_insert_with(HashSet::new)

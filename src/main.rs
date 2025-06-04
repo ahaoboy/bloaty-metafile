@@ -13,7 +13,7 @@ pub struct Args {
     #[arg(short, long, default_value = "0")]
     pub deep: usize,
 
-    #[arg(short, long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     pub no_sections: bool,
 
     #[arg()]
