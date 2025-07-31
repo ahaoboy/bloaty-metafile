@@ -79,6 +79,17 @@ jobs:
           bloaty-metafile cargo-skip-${{ matrix.os }}.csv --name=cargo --lock=cargo.lock > cargo-skip-${{ matrix.os }}.json
           ls -lh
           metafile-image cargo-skip-${{ matrix.os }}.json cargo-${{ matrix.os }}.png
+      - name: rustc.json
+        run: |
+          curl -L -o rustc.lock https://github.com/rust-lang/rust/blob/master/Cargo.lock
+
+          # 100mb
+          bloaty "$(which rustc)" -d sections,symbols -n 0 --csv > rustc-skip-${{ matrix.os }}.csv
+          # 400mb
+          bloaty-metafile rustc-skip-${{ matrix.os }}.csv --name=rustc --lock=rustc.lock > rustc-skip-${{ matrix.os }}.json
+          ls -lh
+          metafile-image rustc-skip-${{ matrix.os }}.json rustc-${{ matrix.os }}.png
+
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -88,3 +99,4 @@ jobs:
             bloaty-metafile-${{ matrix.os }}*
             deno-${{ matrix.os }}*
             cargo-${{ matrix.os }}*
+            rustc-${{ matrix.os }}*
