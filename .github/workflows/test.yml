@@ -71,7 +71,7 @@ jobs:
           metafile-image deno-skip-${{ matrix.os }}.json deno-${{ matrix.os }}.png
       - name: cargo.json
         run: |
-          curl -L -o cargo.lock  https://github.com/rust-lang/cargo/blob/master/Cargo.lock
+          curl -L -o cargo.lock  https://github.com/rust-lang/cargo/raw/refs/heads/master/Cargo.lock
 
           # 100mb
           bloaty "$(which cargo)" -d sections,symbols -n 0 --csv > cargo-skip-${{ matrix.os }}.csv
@@ -81,7 +81,7 @@ jobs:
           metafile-image cargo-skip-${{ matrix.os }}.json cargo-${{ matrix.os }}.png
       - name: rustc.json
         run: |
-          curl -L -o rustc.lock https://github.com/rust-lang/rust/blob/master/Cargo.lock
+          curl -L -o rustc.lock https://github.com/rust-lang/rust/raw/refs/heads/master/Cargo.lock
 
           # 100mb
           bloaty "$(which rustc)" -d sections,symbols -n 0 --csv > rustc-skip-${{ matrix.os }}.csv
