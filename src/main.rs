@@ -35,5 +35,22 @@ fn main() {
     };
     let meta = from_csv(&csv, &name, lock, deep, no_sections);
     let s = serde_json::to_string(&meta).expect("failed to serde metafile to json");
+    // Check if JSON string is too large (JavaScript string length limit)
+    // JavaScript max string length is 2^30 - 1 (0x3fffffff) characters
+    // But V8 uses 0x1fffffe8 as practical limit
+    const MAX_JSON_LENGTH: usize = 0x1fff_ffe8; // ~536MB
+
+    let json_len = s.len();
+
+    if json_len > MAX_JSON_LENGTH {
+        eprintln!(
+            "Warning: JSON output is too large ({} bytes, {} MB)",
+            json_len,
+            json_len >> 20
+        );
+        eprintln!("This exceeds JavaScript's maximum string length (0x1fffffe8 characters)");
+        eprintln!("The output may not be usable in web-based tools like esbuild analyzer");
+    }
+
     println!("{s}");
 }
