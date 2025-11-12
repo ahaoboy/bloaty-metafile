@@ -12,7 +12,7 @@ include = ["/src", "/Cargo.toml", "/README.md"]
 [dependencies]
 serde-metafile = "0.1"
 serde_json = "1"
-cargo-lock = "10"
+cargo-lock = "11"
 clap = { version = "4", features = ["derive"] }
 csv = "1"
 serde = "1"

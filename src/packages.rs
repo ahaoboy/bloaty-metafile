@@ -7,18 +7,33 @@ fn find_shortest_parents(
     dependencies: &HashMap<String, HashSet<String>>,
 ) -> HashMap<String, String> {
     let mut cache: HashMap<String, (usize, usize)> = HashMap::new();
-    fn compute_shortest_path(
-        start: &str,
-        parents: &HashMap<String, HashSet<String>>,
+    fn compute_shortest_path<'a>(
+        start: &'a str,
+        parents: &'a HashMap<String, HashSet<String>>,
         cache: &mut HashMap<String, (usize, usize)>,
+        visiting: &mut HashSet<&'a str>,
     ) -> (usize, usize) {
+        // Cycle detection: if we're already visiting this node, return sentinel value
+        if visiting.contains(start) {
+            return (usize::MAX, usize::MAX);
+        }
+
+        // Check cache after cycle detection to ensure we don't return cached values in a cycle
         if let Some(&cached) = cache.get(start) {
             return cached;
         }
+
+        // Mark this node as being visited
+        visiting.insert(start);
+
         let mut min_path = None;
         if let Some(nodes) = parents.get(start) {
             for parent in nodes {
-                let (path_len, name_len) = compute_shortest_path(parent, parents, cache);
+                let (path_len, name_len) = compute_shortest_path(parent, parents, cache, visiting);
+                // Skip sentinel values (cycles detected)
+                if path_len == usize::MAX {
+                    continue;
+                }
                 let current_path = (path_len + 1, name_len + start.len());
                 if min_path.is_none() || current_path < min_path.unwrap() {
                     min_path = Some(current_path);
@@ -26,6 +41,10 @@ fn find_shortest_parents(
             }
         }
         let min_path = min_path.unwrap_or((0, 0));
+
+        // Remove from visiting set before returning
+        visiting.remove(start);
+
         cache.insert(start.to_string(), min_path);
         min_path
     }
@@ -37,8 +56,10 @@ fn find_shortest_parents(
                 .iter()
                 .filter(|p| dependencies[*p].contains(name))
                 .min_by(|&a, &b| {
-                    let a_path = compute_shortest_path(a, parents, &mut cache);
-                    let b_path = compute_shortest_path(b, parents, &mut cache);
+                    let mut visiting_a = HashSet::new();
+                    let mut visiting_b = HashSet::new();
+                    let a_path = compute_shortest_path(a, parents, &mut cache, &mut visiting_a);
+                    let b_path = compute_shortest_path(b, parents, &mut cache, &mut visiting_b);
                     a_path.cmp(&b_path)
                 })
                 .unwrap_or(name);
