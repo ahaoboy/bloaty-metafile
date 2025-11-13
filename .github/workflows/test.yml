@@ -47,6 +47,7 @@ jobs:
           url: |-
             https://github.com/denoland/deno
             https://github.com/ahaoboy/bloaty-build
+            https://github.com/ahaoboy/metafile-viz
 
       - name: build
         run: |
@@ -59,6 +60,7 @@ jobs:
           npm i metafile-image -g
           metafile-image --version
           metafile-image bloaty-metafile-${{ matrix.os }}.json bloaty-metafile-${{ matrix.os }}.png
+          metafile-viz bloaty-metafile-${{ matrix.os }}.json -o bloaty-metafile-viz-${{ matrix.os }}.png
       - name: deno.json
         run: |
           curl -L -o deno.lock  https://github.com/denoland/deno/raw/refs/heads/main/Cargo.lock
@@ -69,6 +71,7 @@ jobs:
           bloaty-metafile deno-skip-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-skip-${{ matrix.os }}.json
           ls -lh
           metafile-image deno-skip-${{ matrix.os }}.json deno-${{ matrix.os }}.png
+          metafile-viz deno-skip-${{ matrix.os }}.json -o deno-viz-${{ matrix.os }}.png
       - name: cargo.json
         run: |
           curl -L -o cargo.lock  https://github.com/rust-lang/cargo/raw/refs/heads/master/Cargo.lock
@@ -79,6 +82,7 @@ jobs:
           bloaty-metafile cargo-skip-${{ matrix.os }}.csv --name=cargo --lock=cargo.lock > cargo-skip-${{ matrix.os }}.json
           ls -lh
           metafile-image cargo-skip-${{ matrix.os }}.json cargo-${{ matrix.os }}.png
+          metafile-viz cargo-skip-${{ matrix.os }}.json -o cargo-viz-${{ matrix.os }}.png
       - name: rustc.json
         run: |
           curl -L -o rustc.lock https://github.com/rust-lang/rust/raw/refs/heads/master/Cargo.lock
@@ -89,6 +93,7 @@ jobs:
           bloaty-metafile rustc-skip-${{ matrix.os }}.csv --name=rustc --lock=rustc.lock > rustc-skip-${{ matrix.os }}.json
           ls -lh
           metafile-image rustc-skip-${{ matrix.os }}.json rustc-${{ matrix.os }}.png
+          metafile-viz rustc-skip-${{ matrix.os }}.json -o rustc-viz-${{ matrix.os }}.png
 
 
       - name: Upload
