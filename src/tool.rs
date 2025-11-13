@@ -31,7 +31,6 @@ pub fn get_path_from_record(symbols: String, sections: String, packages: &Packag
             // crate
             // .text,llrt_utils::clone::structured_clone -> llrt/llrt_utils/.text/clone/structured_clone
             let mut prefix = packages.get_path(&crate_name);
-            prefix.reverse();
             prefix.push(sections);
             prefix.extend_from_slice(&symbols_parts[1..]);
             prefix

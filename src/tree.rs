@@ -48,7 +48,7 @@ impl Tree {
             .flat_map(|i| i.ok())
             .collect();
         let packages = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string()))
-            .map(|lock| Packages::new(lock, &records))
+            .map(|lock| Packages::new(&lock.dependency_tree().unwrap(), &records))
             .unwrap_or_default();
 
         for record in records {
