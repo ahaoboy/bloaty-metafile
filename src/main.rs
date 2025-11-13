@@ -1,4 +1,4 @@
-use bloaty_metafile::from_csv;
+use bloaty_metafile::{BloatyError, from_csv};
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -20,7 +20,7 @@ pub struct Args {
     pub path: Option<String>,
 }
 
-fn main() {
+fn main() -> Result<(), BloatyError> {
     let Args {
         name,
         lock,
@@ -28,13 +28,26 @@ fn main() {
         path,
         no_sections,
     } = Args::parse();
-    let csv = if let Some(path) = path {
-        std::fs::read_to_string(path).expect("failed to read csv file")
+
+    // Read CSV input from file or stdin
+    let csv = if let Some(ref file_path) = path {
+        std::fs::read_to_string(file_path).map_err(|source| BloatyError::FileRead {
+            path: file_path.clone(),
+            source,
+        })?
     } else {
-        std::io::read_to_string(std::io::stdin()).expect("failed to read csv from stdio")
+        std::io::read_to_string(std::io::stdin()).map_err(|source| BloatyError::FileRead {
+            path: "stdin".to_string(),
+            source,
+        })?
     };
-    let meta = from_csv(&csv, &name, lock, deep, no_sections);
-    let s = serde_json::to_string(&meta).expect("failed to serde metafile to json");
+
+    // Parse CSV and generate metafile
+    let meta = from_csv(&csv, &name, lock, deep, no_sections)?;
+
+    // Serialize to JSON
+    let s = serde_json::to_string(&meta)?;
+
     // Check if JSON string is too large (JavaScript string length limit)
     // JavaScript max string length is 2^30 - 1 (0x3fffffff) characters
     // But V8 uses 0x1fffffe8 as practical limit
@@ -53,4 +66,6 @@ fn main() {
     }
 
     println!("{s}");
+
+    Ok(())
 }

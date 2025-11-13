@@ -16,6 +16,7 @@ cargo-lock = { version = "11", features = ["dependency-tree"] }
 clap = { version = "4", features = ["derive"] }
 csv = "1"
 serde = "1"
+thiserror = "2"
 
 [profile.release]
 debug = false
