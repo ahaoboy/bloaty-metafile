@@ -26,22 +26,21 @@ struct BfsNode {
 }
 
 impl BfsNode {
-    /// Create a new BFS node from a graph index
-    fn new(g: &Graph, index: NodeIndex) -> Self {
+    /// Create a BFS node from a graph index with an optional parent path
+    /// If parent_path is None, creates a root node; otherwise extends the path
+    #[inline]
+    fn from_graph(g: &Graph, index: NodeIndex, parent_path: Option<Vec<String>>) -> Self {
         let name = normalize_crate_name(g[index].name.as_str());
         let name_boxed: Box<str> = name.as_str().into();
-        Self {
-            name: name_boxed,
-            path: vec![name],
-            index,
-        }
-    }
 
-    /// Create a child BFS node with an extended path
-    fn child(g: &Graph, index: NodeIndex, mut path: Vec<String>) -> Self {
-        let name = normalize_crate_name(g[index].name.as_str());
-        let name_boxed: Box<str> = name.as_str().into();
-        path.push(name);
+        let path = match parent_path {
+            Some(mut p) => {
+                p.push(name);
+                p
+            }
+            None => vec![name],
+        };
+
         Self {
             name: name_boxed,
             path,
@@ -72,7 +71,7 @@ impl Packages {
 
         // Initialize queue with root nodes
         for &start in &roots {
-            queue.push_back(BfsNode::new(g, start));
+            queue.push_back(BfsNode::from_graph(g, start, None));
         }
 
         // BFS traversal to find shortest paths
@@ -82,27 +81,24 @@ impl Packages {
             }
 
             let name_str = name.as_ref();
-            if crates.contains(name_str) {
-                // Use entry API to avoid double lookup
-                parent
-                    .entry(name_str.to_string())
-                    .and_modify(|entry| {
-                        // Keep shorter path
-                        if entry.len() > path.len() {
-                            *entry = path.clone();
-                        }
-                    })
-                    .or_insert_with(|| path.clone());
-            } else {
-                parent.insert(name_str.to_string(), path.clone());
-            }
+
+            // Insert or update path for this crate
+            parent
+                .entry(name_str.to_string())
+                .and_modify(|entry| {
+                    // Keep shorter path if crate is in records
+                    if crates.contains(name_str) && entry.len() > path.len() {
+                        *entry = path.clone();
+                    }
+                })
+                .or_insert_with(|| path.clone());
 
             visited.insert(index);
 
             // Add unvisited neighbors to queue
             for neighbor in g.neighbors(index) {
                 if !visited.contains(&neighbor) {
-                    queue.push_back(BfsNode::child(g, neighbor, path.clone()));
+                    queue.push_back(BfsNode::from_graph(g, neighbor, Some(path.clone())));
                 }
             }
         }
