@@ -62,17 +62,14 @@ jobs:
           [
             {
               "name": "nu",
-              "binary": "$(which nu)",
               "lock": "https://github.com/nushell/nushell/raw/refs/heads/main/Cargo.lock"
             },
             {
               "name": "cargo",
-              "binary": "$(which cargo)",
               "lock": "https://github.com/rust-lang/cargo/raw/refs/heads/master/Cargo.lock"
             },
             {
               "name": "rustc",
-              "binary": "$(which rustc)",
               "lock": "https://github.com/rust-lang/rust/raw/refs/heads/main/Cargo.lock"
             }
           ]
@@ -80,10 +77,9 @@ jobs:
 
           jq -c '.[]' resources.json | while read item; do
             name=$(echo "$item" | jq -r '.name')
-            bin=$(echo "$item" | jq -r '.binary')
             lock_url=$(echo "$item" | jq -r '.lock')
+            bin=$(which "$name")
 
-            echo "Downloading lock: $lock_url"
             curl -L -o "$name.lock" "$lock_url"
 
             csv="${name}-${{ matrix.os }}.csv"
