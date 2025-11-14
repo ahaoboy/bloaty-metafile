@@ -47,64 +47,61 @@ jobs:
         uses: ahaoboy/easy-setup@v1
         with:
           url: |-
-            https://github.com/denoland/deno
+            https://github.com/nushell/nushell
             https://github.com/ahaoboy/bloaty-build
             https://github.com/ahaoboy/metafile-viz
 
-      - name: build
+      - name: install metafile-image
         run: |
-          cargo build --profile bloaty
-      - name: bloaty-metafile.json
-        run: |
-          bloaty "$(which bloaty-metafile)" -d sections,symbols -n 0 --csv > bloaty-metafile-${{ matrix.os }}.csv
-          bloaty-metafile bloaty-metafile-${{ matrix.os }}.csv --name=bloaty-metafile > bloaty-metafile-${{ matrix.os }}.json
-          ls -lh
           npm i metafile-image -g
           metafile-image --version
           metafile-viz --version
-          metafile-image bloaty-metafile-${{ matrix.os }}.json bloaty-metafile-${{ matrix.os }}.png
-          metafile-viz bloaty-metafile-${{ matrix.os }}.json -o bloaty-metafile-${{ matrix.os }}-viz.png
-      - name: deno.json
+      - name: Build & Run All
         run: |
-          curl -L -o deno.lock  https://github.com/denoland/deno/raw/refs/heads/main/Cargo.lock
+          cat << 'EOF' > resources.json
+          [
+            {
+              "name": "nu",
+              "binary": "$(which nu)",
+              "lock": "https://github.com/nushell/nushell/raw/refs/heads/main/Cargo.lock"
+            },
+            {
+              "name": "cargo",
+              "binary": "$(which cargo)",
+              "lock": "https://github.com/rust-lang/cargo/raw/refs/heads/master/Cargo.lock"
+            },
+            {
+              "name": "rustc",
+              "binary": "$(which rustc)",
+              "lock": "https://github.com/rust-lang/rust/raw/refs/heads/main/Cargo.lock"
+            }
+          ]
+          EOF
 
-          # 100mb
-          bloaty "$(which deno)" -d sections,symbols -n 0 --csv > deno-skip-${{ matrix.os }}.csv
-          # 400mb
-          bloaty-metafile deno-skip-${{ matrix.os }}.csv --name=deno --lock=deno.lock > deno-skip-${{ matrix.os }}.json
-          ls -lh
-          metafile-image deno-skip-${{ matrix.os }}.json deno-${{ matrix.os }}.png
-          metafile-viz deno-skip-${{ matrix.os }}.json -o deno-${{ matrix.os }}-viz.png
-      - name: cargo.json
-        run: |
-          curl -L -o cargo.lock  https://github.com/rust-lang/cargo/raw/refs/heads/master/Cargo.lock
+          jq -c '.[]' resources.json | while read item; do
+            name=$(echo "$item" | jq -r '.name')
+            bin=$(echo "$item" | jq -r '.binary')
+            lock_url=$(echo "$item" | jq -r '.lock')
 
-          # 100mb
-          bloaty "$(which cargo)" -d sections,symbols -n 0 --csv > cargo-skip-${{ matrix.os }}.csv
-          # 400mb
-          bloaty-metafile cargo-skip-${{ matrix.os }}.csv --name=cargo --lock=cargo.lock > cargo-skip-${{ matrix.os }}.json
-          ls -lh
-          metafile-image cargo-skip-${{ matrix.os }}.json cargo-${{ matrix.os }}.png
-          metafile-viz cargo-skip-${{ matrix.os }}.json -o cargo-${{ matrix.os }}-viz.png
-      - name: rustc.json
-        run: |
-          curl -L -o rustc.lock https://github.com/rust-lang/rust/raw/refs/heads/main/Cargo.lock
+            echo "Downloading lock: $lock_url"
+            curl -L -o "$name.lock" "$lock_url"
 
-          # 100mb
-          bloaty "$(which rustc)" -d sections,symbols -n 0 --csv > rustc-skip-${{ matrix.os }}.csv
-          # 400mb
-          bloaty-metafile rustc-skip-${{ matrix.os }}.csv --name=rustc --lock=rustc.lock > rustc-skip-${{ matrix.os }}.json
-          ls -lh
-          metafile-image rustc-skip-${{ matrix.os }}.json rustc-${{ matrix.os }}.png
-          metafile-viz rustc-skip-${{ matrix.os }}.json -o rustc-${{ matrix.os }}-viz.png
+            csv="${name}-${{ matrix.os }}.csv"
+            json="${name}-${{ matrix.os }}.json"
 
+            bloaty "$bin" -d sections,symbols -n 0 --csv > "$csv"
+
+            bloaty-metafile "$csv" --name="$name" --lock="$name.lock" --no-sections > "$json"
+
+            metafile-image "$json" "${name}-${{ matrix.os }}.png"
+            metafile-viz   "$json" -o "${name}-${{ matrix.os }}-viz.png"
+          done
+
+          ls -lh .
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: bloaty-metafile-${{ matrix.os }}
           path: |
-            bloaty-metafile-${{ matrix.os }}*
-            deno-${{ matrix.os }}*
-            cargo-${{ matrix.os }}*
-            rustc-${{ matrix.os }}*
+            *-${{ matrix.os }}*
