@@ -1,127 +1,121 @@
 use crate::{tool::get_crate_name, tree::SectionRecord};
-use cargo_lock::Lockfile;
-use std::collections::{HashMap, HashSet};
+use cargo_lock::dependency::{
+    Tree,
+    graph::{Graph, NodeIndex},
+};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-fn find_shortest_parents(
-    parents: &HashMap<String, HashSet<String>>,
-    dependencies: &HashMap<String, HashSet<String>>,
-) -> HashMap<String, String> {
-    let mut cache: HashMap<String, (usize, usize)> = HashMap::new();
-    fn compute_shortest_path(
-        start: &str,
-        parents: &HashMap<String, HashSet<String>>,
-        cache: &mut HashMap<String, (usize, usize)>,
-    ) -> (usize, usize) {
-        if let Some(&cached) = cache.get(start) {
-            return cached;
-        }
-        let mut min_path = None;
-        if let Some(nodes) = parents.get(start) {
-            for parent in nodes {
-                let (path_len, name_len) = compute_shortest_path(parent, parents, cache);
-                let current_path = (path_len + 1, name_len + start.len());
-                if min_path.is_none() || current_path < min_path.unwrap() {
-                    min_path = Some(current_path);
-                }
-            }
-        }
-        let min_path = min_path.unwrap_or((0, 0));
-        cache.insert(start.to_string(), min_path);
-        min_path
-    }
-
-    let parent_map: HashMap<String, String> = parents
-        .keys()
-        .map(|name| {
-            let shortest_parent = parents[name]
-                .iter()
-                .filter(|p| dependencies[*p].contains(name))
-                .min_by(|&a, &b| {
-                    let a_path = compute_shortest_path(a, parents, &mut cache);
-                    let b_path = compute_shortest_path(b, parents, &mut cache);
-                    a_path.cmp(&b_path)
-                })
-                .unwrap_or(name);
-            (name.clone(), shortest_parent.clone())
-        })
-        .collect();
-
-    parent_map
-}
-
+/// Package dependency resolver
+/// Maps crate names to their dependency paths in the dependency tree
 #[derive(Debug, Default, Clone)]
 pub struct Packages {
-    parent: HashMap<String, String>,
+    parent: HashMap<String, Vec<String>>,
+}
+
+/// Helper function to normalize crate names by replacing hyphens with underscores
+#[inline]
+fn normalize_crate_name(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// Node used in breadth-first search traversal of the dependency graph
+struct BfsNode {
+    name: Box<str>,
+    path: Vec<String>,
+    index: NodeIndex,
+}
+
+impl BfsNode {
+    /// Create a BFS node from a graph index with an optional parent path
+    /// If parent_path is None, creates a root node; otherwise extends the path
+    #[inline]
+    fn from_graph(g: &Graph, index: NodeIndex, parent_path: Option<Vec<String>>) -> Self {
+        let name = normalize_crate_name(g[index].name.as_str());
+        let name_boxed: Box<str> = name.as_str().into();
+
+        let path = match parent_path {
+            Some(mut p) => {
+                p.push(name);
+                p
+            }
+            None => vec![name],
+        };
+
+        Self {
+            name: name_boxed,
+            path,
+            index,
+        }
+    }
 }
 
 impl Packages {
-    pub fn new(lock: Lockfile, records: &[SectionRecord]) -> Self {
+    /// Create a new Packages resolver from a dependency tree and section records
+    /// Uses BFS to find the shortest path to each crate in the dependency graph
+    pub fn new(tree: &Tree, records: &[SectionRecord]) -> Self {
+        // Build set of crate names from records
         let crates: HashSet<String> = records
             .iter()
-            .filter_map(|i| get_crate_name(&i.symbols))
+            .filter_map(|record| get_crate_name(&record.symbols))
             .map(|(name, _)| name)
             .collect();
 
-        let (mut parents, dependencies) = lock.packages.into_iter().fold(
-            (HashMap::new(), HashMap::new()),
-            |(mut parents, mut deps), pkg| {
-                let name = pkg.name.as_str().replace("-", "_");
-                parents.entry(name.clone()).or_insert_with(HashSet::new);
+        let g = tree.graph();
+        let roots = tree.roots().to_vec();
 
-                let pkg_deps: HashSet<String> = pkg
-                    .dependencies
-                    .iter()
-                    .map(|dep| dep.name.as_str().replace("-", "_"))
-                    .collect();
+        // Pre-allocate collections with estimated capacity
+        let estimated_nodes = g.node_count();
+        let mut visited = HashSet::with_capacity(estimated_nodes);
+        let mut queue = VecDeque::with_capacity(estimated_nodes / 4);
+        let mut parent: HashMap<String, Vec<String>> = HashMap::with_capacity(crates.len());
 
-                for dep in &pkg_deps {
-                    // Avoid self-dependence
-                    if dep == &name {
-                        continue;
+        // Initialize queue with root nodes
+        for &start in &roots {
+            queue.push_back(BfsNode::from_graph(g, start, None));
+        }
+
+        // BFS traversal to find shortest paths
+        while let Some(BfsNode { name, path, index }) = queue.pop_front() {
+            if visited.contains(&index) {
+                continue;
+            }
+
+            let name_str = name.as_ref();
+
+            // Insert or update path for this crate
+            parent
+                .entry(name_str.to_string())
+                .and_modify(|entry| {
+                    // Keep shorter path if crate is in records
+                    if crates.contains(name_str) && entry.len() > path.len() {
+                        *entry = path.clone();
                     }
-                    parents
-                        .entry(dep.clone())
-                        .or_insert_with(HashSet::new)
-                        .insert(name.clone());
-                }
-                deps.insert(name, pkg_deps);
-                (parents, deps)
-            },
-        );
+                })
+                .or_insert_with(|| path.clone());
 
-        let mut roots = HashSet::new();
-        while let Some(root) = parents
-            .iter()
-            .find_map(|(k, v)| v.is_empty().then(|| k.clone()))
-        {
-            let is_real_root = crates.contains(&root);
-            parents.remove(&root);
-            if is_real_root {
-                roots.insert(root.clone());
-            }
-            for p in parents.values_mut() {
-                if p.remove(&root) && is_real_root {
-                    p.insert(root.clone());
+            visited.insert(index);
+
+            // Add unvisited neighbors to queue
+            for neighbor in g.neighbors(index) {
+                if !visited.contains(&neighbor) {
+                    queue.push_back(BfsNode::from_graph(g, neighbor, Some(path.clone())));
                 }
             }
         }
-        for i in roots {
-            parents.insert(i, HashSet::new());
+
+        // Ensure standard library crates (std, alloc) have entries
+        for crate_name in crates {
+            parent
+                .entry(crate_name.clone())
+                .or_insert_with(|| vec![crate_name]);
         }
-        let parent = find_shortest_parents(&parents, &dependencies);
+
         Self { parent }
     }
 
-    pub fn get_path(&self, id: &str) -> Vec<String> {
-        let mut path = vec![id.to_string()];
-        let mut cur = id;
-        while let Some(parent) = self.parent.get(cur) {
-            if parent == cur {
-                break;
-            }
-            path.push(parent.clone());
-            cur = parent;
-        }
-        path
+    /// Get the dependency path for a crate by ID
+    /// Returns a reference to avoid cloning when possible
+    pub fn get_path(&self, id: &str) -> &[String] {
+        self.parent.get(id).map(|v| v.as_slice()).unwrap_or(&[])
     }
 }

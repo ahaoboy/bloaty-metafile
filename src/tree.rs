@@ -1,4 +1,5 @@
 use crate::{
+    error::{BloatyError, Result},
     packages::Packages,
     tool::{ROOT_NAME, SECTIONS_NAME, UNKNOWN_NAME, get_path_from_record},
 };
@@ -7,16 +8,33 @@ use serde::Deserialize;
 use serde_metafile::{Import, Input, InputDetail, Metafile, Output};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default)]
+/// Tree node representing a symbol or section in the binary
+/// Contains size information and child nodes
+#[derive(Debug, Clone)]
 pub struct Node {
-    pub name: String,
+    pub name: Box<str>,
     pub vmsize: u64,
     pub filesize: u64,
     pub total_vmsize: u64,
     pub total_filesize: u64,
-    pub nodes: HashMap<String, Node>,
+    pub nodes: HashMap<Box<str>, Node>,
 }
 
+impl Default for Node {
+    fn default() -> Self {
+        Self {
+            name: String::new().into_boxed_str(),
+            vmsize: 0,
+            filesize: 0,
+            total_vmsize: 0,
+            total_filesize: 0,
+            nodes: HashMap::new(),
+        }
+    }
+}
+
+/// CSV record from bloaty output
+/// Contains section name, symbol name, virtual memory size, and file size
 #[derive(Debug, Deserialize)]
 pub struct SectionRecord {
     pub sections: String,
@@ -25,15 +43,18 @@ pub struct SectionRecord {
     pub filesize: u64,
 }
 
+/// Hierarchical tree structure for organizing binary symbols and sections
 pub struct Tree {
     root: Node,
 }
 
 impl Tree {
-    pub fn new(csv: &str, lock: Option<String>, no_sections: bool) -> Tree {
+    /// Create a new tree from CSV data and optional Cargo.lock file
+    /// Parses CSV records and builds a hierarchical structure
+    pub fn new(csv: &str, lock: Option<String>, no_sections: bool) -> Result<Tree> {
         let mut tree = Tree {
             root: Node {
-                name: ROOT_NAME.to_string(),
+                name: ROOT_NAME.to_string().into_boxed_str(),
                 vmsize: 0,
                 filesize: 0,
                 nodes: HashMap::new(),
@@ -42,15 +63,31 @@ impl Tree {
             },
         };
 
+        // Parse CSV records
         let mut rdr = csv::Reader::from_reader(csv.as_bytes());
         let records: Vec<_> = rdr
             .deserialize::<SectionRecord>()
-            .flat_map(|i| i.ok())
-            .collect();
-        let packages = Lockfile::load(lock.unwrap_or("Cargo.lock".to_string()))
-            .map(|lock| Packages::new(lock, &records))
+            .collect::<std::result::Result<Vec<_>, csv::Error>>()
+            .map_err(BloatyError::CsvParse)?;
+
+        // Load Cargo.lock and resolve package dependencies
+        let lock_path = lock.unwrap_or_else(|| "Cargo.lock".to_string());
+        let packages = Lockfile::load(&lock_path)
+            .map_err(|source| BloatyError::LockfileLoad {
+                path: lock_path.clone(),
+                source,
+            })
+            .and_then(|lock| {
+                lock.dependency_tree()
+                    .map_err(|source| BloatyError::LockfileLoad {
+                        path: lock_path.clone(),
+                        source,
+                    })
+            })
+            .map(|dep_tree| Packages::new(&dep_tree, &records))
             .unwrap_or_default();
 
+        // Build tree from records
         for record in records {
             let sym = if record.symbols.is_empty() {
                 UNKNOWN_NAME.to_string()
@@ -64,15 +101,23 @@ impl Tree {
             tree.add_path(&path, record.vmsize, record.filesize);
         }
 
-        tree
+        Ok(tree)
     }
 
+    /// Convert the tree to an esbuild metafile format
+    /// Traverses the tree and generates the metafile structure
     pub fn to_metafile(&self, name: &str, deep: usize) -> Metafile {
         let root = &self.root;
-        let mut inputs = HashMap::new();
-        for i in root.nodes.values() {
-            i.traverse(&mut inputs, None, deep);
+
+        // Pre-allocate HashMap with estimated capacity
+        let mut inputs = HashMap::with_capacity(root.nodes.len() * 4);
+
+        // Traverse all root nodes to build inputs
+        for node in root.nodes.values() {
+            node.traverse(&mut inputs, None, deep);
         }
+
+        // Build output_inputs using iterator chain
         let output_inputs: HashMap<_, _> = inputs
             .iter()
             .map(|(path, input)| {
@@ -84,6 +129,7 @@ impl Tree {
                 )
             })
             .collect();
+
         let output = Output {
             bytes: root.total_filesize,
             inputs: output_inputs,
@@ -92,68 +138,117 @@ impl Tree {
             entry_point: None,
             css_bundle: None,
         };
+
         let outputs = HashMap::from([(name.to_string(), output)]);
         Metafile { inputs, outputs }
     }
 
+    /// Add a path to the tree with associated size information
+    /// Creates intermediate nodes as needed
     fn add_path(&mut self, path: &[String], vmsize: u64, filesize: u64) {
         let mut current = &mut self.root;
+        let last_idx = path.len() - 1;
+
         for (i, part) in path.iter().enumerate() {
             current.total_vmsize += vmsize;
             current.total_filesize += filesize;
-            if i == path.len() - 1 {
-                let n = current.nodes.entry(part.clone()).or_insert(Node {
-                    name: part.clone(),
-                    vmsize,
-                    filesize,
-                    nodes: HashMap::new(),
-                    total_filesize: 0,
-                    total_vmsize: 0,
-                });
-                n.vmsize = vmsize;
-                n.filesize = filesize;
-            } else {
-                current = current.nodes.entry(part.clone()).or_insert(Node {
-                    name: part.clone(),
-                    vmsize: 0,
-                    filesize: 0,
-                    nodes: HashMap::new(),
-                    total_filesize: 0,
-                    total_vmsize: 0,
-                });
+
+            let is_leaf = i == last_idx;
+            let part_boxed: Box<str> = part.as_str().into();
+
+            // Use entry API to avoid double lookup
+            current = current.nodes.entry(part_boxed.clone()).or_insert_with(|| {
+                Node::create_node(
+                    part_boxed.clone(),
+                    if is_leaf { vmsize } else { 0 },
+                    if is_leaf { filesize } else { 0 },
+                    is_leaf,
+                )
+            });
+
+            // Update leaf node values if it already exists
+            if is_leaf {
+                current.vmsize = vmsize;
+                current.filesize = filesize;
             }
         }
     }
 }
 
 impl Node {
+    /// Helper function to create a new node with given parameters
+    #[inline]
+    fn create_node(name: Box<str>, vmsize: u64, filesize: u64, is_leaf: bool) -> Self {
+        Self {
+            name,
+            vmsize,
+            filesize,
+            nodes: if is_leaf {
+                HashMap::new()
+            } else {
+                HashMap::with_capacity(4) // Pre-allocate for intermediate nodes
+            },
+            total_filesize: 0,
+            total_vmsize: 0,
+        }
+    }
+
+    /// Recursively traverse the tree to build metafile inputs
+    /// Respects the depth limit if specified
     fn traverse(&self, inputs: &mut HashMap<String, Input>, dir: Option<String>, deep: usize) {
-        let full_path = self.name.clone();
-        let dir: String = dir.map_or(full_path.clone(), |i| i + "/" + &full_path);
-        if deep != 0 && dir.matches("/").count() >= deep {
+        // Build directory path with capacity pre-allocation
+        let dir: String = match &dir {
+            Some(parent) => {
+                let mut path = String::with_capacity(parent.len() + 1 + self.name.len());
+                path.push_str(parent);
+                path.push('/');
+                path.push_str(&self.name);
+                path
+            }
+            None => self.name.to_string(),
+        };
+
+        // Early return if depth limit reached
+        if deep != 0 && dir.matches('/').count() >= deep {
             return;
         }
 
-        let imports = self
+        // Build imports using iterator chain without intermediate collection
+        let imports: Vec<Import> = self
             .nodes
             .values()
-            .map(|child| Import {
-                path: dir.clone() + "/" + &child.name,
-                kind: None,
-                external: false,
-                original: None,
-                with: None,
+            .map(|child| {
+                // Pre-allocate string capacity for import path
+                let mut import_path = String::with_capacity(dir.len() + 1 + child.name.len());
+                import_path.push_str(&dir);
+                import_path.push('/');
+                import_path.push_str(&child.name);
+                Import {
+                    path: import_path,
+                    kind: None,
+                    external: false,
+                    original: None,
+                    with: None,
+                }
             })
             .collect();
+
         let input = Input {
             bytes: self.filesize,
             imports,
             format: None,
             with: None,
         };
+
+        // Insert input before recursing to avoid cloning dir multiple times
         inputs.insert(dir.clone(), input);
-        for child in self.nodes.values() {
-            child.traverse(inputs, Some(dir.clone()), deep);
+
+        // Recurse into children - reuse dir reference
+        if !self.nodes.is_empty() {
+            let dir_ref = Some(dir);
+            for child in self.nodes.values() {
+                child.traverse(inputs, dir_ref.clone(), deep);
+            }
         }
     }
 }
@@ -174,7 +269,7 @@ sections,symbols,vmsize,filesize
 .text,[1843 Others],1086372,1086372
 "#,
         ] {
-            let tree = Tree::new(csv, None, false);
+            let tree = Tree::new(csv, None, false).expect("Failed to create tree");
             assert_eq!(tree.root.nodes.len(), 1)
         }
     }
