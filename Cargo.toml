@@ -17,6 +17,8 @@ clap = { version = "4", features = ["derive"] }
 csv = "1"
 serde = "1"
 thiserror = "2"
+git-version = "0.3"
+const-str = "0.7"
 
 [profile.release]
 debug = false
