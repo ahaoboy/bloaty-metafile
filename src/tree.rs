@@ -160,16 +160,16 @@ impl Tree {
             current = current.nodes.entry(part_boxed.clone()).or_insert_with(|| {
                 Node::create_node(
                     part_boxed.clone(),
-                    if is_leaf { vmsize } else { 0 },
-                    if is_leaf { filesize } else { 0 },
+                    0, // Initialize with 0, will be accumulated below
+                    0,
                     is_leaf,
                 )
             });
 
-            // Update leaf node values if it already exists
+            // Accumulate leaf node values (don't overwrite)
             if is_leaf {
-                current.vmsize = vmsize;
-                current.filesize = filesize;
+                current.vmsize += vmsize;
+                current.filesize += filesize;
             }
         }
     }
@@ -208,43 +208,51 @@ impl Node {
             None => self.name.to_string(),
         };
 
-        // Early return if depth limit reached
-        if deep != 0 && dir.matches('/').count() >= deep {
-            return;
-        }
+        let current_depth = dir.matches('/').count();
 
-        // Build imports using iterator chain without intermediate collection
-        let imports: Vec<Import> = self
-            .nodes
-            .values()
-            .map(|child| {
-                // Pre-allocate string capacity for import path
-                let mut import_path = String::with_capacity(dir.len() + 1 + child.name.len());
-                import_path.push_str(&dir);
-                import_path.push('/');
-                import_path.push_str(&child.name);
-                Import {
-                    path: import_path,
-                    kind: None,
-                    external: false,
-                    original: None,
-                    with: None,
-                }
-            })
-            .collect();
+        // Check if we're at the depth limit
+        let at_depth_limit = deep != 0 && current_depth >= deep;
+
+        // Build imports (only if not at depth limit)
+        let imports: Vec<Import> = if at_depth_limit {
+            vec![]
+        } else {
+            self.nodes
+                .values()
+                .map(|child| {
+                    let mut import_path = String::with_capacity(dir.len() + 1 + child.name.len());
+                    import_path.push_str(&dir);
+                    import_path.push('/');
+                    import_path.push_str(&child.name);
+                    Import {
+                        path: import_path,
+                        kind: None,
+                        external: false,
+                        original: None,
+                        with: None,
+                    }
+                })
+                .collect()
+        };
+
+        // Use total_filesize when at depth limit to include all children's sizes
+        let bytes = if at_depth_limit {
+            self.total_filesize
+        } else {
+            self.filesize
+        };
 
         let input = Input {
-            bytes: self.filesize,
+            bytes,
             imports,
             format: None,
             with: None,
         };
 
-        // Insert input before recursing to avoid cloning dir multiple times
         inputs.insert(dir.clone(), input);
 
-        // Recurse into children - reuse dir reference
-        if !self.nodes.is_empty() {
+        // Recurse into children only if not at depth limit
+        if !at_depth_limit && !self.nodes.is_empty() {
             let dir_ref = Some(dir);
             for child in self.nodes.values() {
                 child.traverse(inputs, dir_ref.clone(), deep);
