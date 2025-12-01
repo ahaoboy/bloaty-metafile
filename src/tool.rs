@@ -18,7 +18,8 @@ pub fn symbol_is_crate(s: &str) -> bool {
 /// - Regular: `crate::module::func`
 /// - Trait impl: `<&core::alloc::layout::Layout as core::fmt::Debug>::fmt`
 /// - Type method: `<url::Url>::set_password`
-/// Returns the crate name and all symbol parts if valid, None otherwise
+/// - Nested: `<u8 as <[_]>::to_vec_in::ConvertVec>::to_vec::<>`
+///   Returns the crate name and all symbol parts if valid, None otherwise
 pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
     // Handle angle bracket symbols (trait impls, type methods)
     if symbols.starts_with('<') {
@@ -43,11 +44,8 @@ pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
         let inner = &symbols[1..close_pos];
 
         // Check for trait impl pattern: `<Type as Trait>` or simple type: `<Type>`
-        let type_part = if let Some(as_pos) = inner.find(" as ") {
-            &inner[..as_pos]
-        } else {
-            inner
-        };
+        // For nested patterns like `<u8 as <[_]>::to_vec_in::ConvertVec>`, find " as " not inside nested <>
+        let type_part = find_type_part(inner);
 
         // Extract crate name from type part (skip leading & or *)
         let type_clean = type_part.trim_start_matches(['&', '*']);
@@ -64,9 +62,16 @@ pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
 
         // Add method name after `>::`
         if let Some(method) = symbols[close_pos..].strip_prefix(">::") {
-            parts.extend(method.split("::").filter(|s| !s.is_empty()).map(String::from));
+            // Filter out empty parts and generic markers like `<>`
+            parts.extend(
+                method
+                    .split("::")
+                    .filter(|s| !s.is_empty() && *s != "<>")
+                    .map(|s| s.trim_end_matches("::<>").to_string()),
+            );
         }
 
+        // For primitive types like u8, we need at least the type + method
         if parts.len() > 1 {
             return Some((parts[0].clone(), parts));
         }
@@ -90,6 +95,27 @@ pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
     } else {
         None
     }
+}
+
+/// Find the type part in an angle bracket expression
+/// Handles nested angle brackets like `<u8 as <[_]>::to_vec_in::ConvertVec>`
+fn find_type_part(inner: &str) -> &str {
+    // Find " as " that is not inside nested angle brackets
+    let mut depth = 0;
+    let bytes = inner.as_bytes();
+    let as_pattern = b" as ";
+
+    for i in 0..inner.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b' ' if depth == 0 && i + 4 <= inner.len() && &bytes[i..i + 4] == as_pattern => {
+                return &inner[..i];
+            }
+            _ => {}
+        }
+    }
+    inner
 }
 
 /// Build a hierarchical path from a symbol record
@@ -164,8 +190,7 @@ mod test {
         assert_eq!(parts, vec!["url", "Url", "set_password"]);
 
         // Test: <core::alloc::layout::LayoutError as core::fmt::Debug>::fmt
-        let result =
-            get_crate_name("<core::alloc::layout::LayoutError as core::fmt::Debug>::fmt");
+        let result = get_crate_name("<core::alloc::layout::LayoutError as core::fmt::Debug>::fmt");
         assert!(result.is_some());
         let (crate_name, parts) = result.unwrap();
         assert_eq!(crate_name, "core");
@@ -177,5 +202,12 @@ mod test {
         let (crate_name, parts) = result.unwrap();
         assert_eq!(crate_name, "llrt_utils");
         assert_eq!(parts, vec!["llrt_utils", "clone", "structured_clone"]);
+
+        // Test nested angle brackets: <u8 as <[_]>::to_vec_in::ConvertVec>::to_vec::<>
+        let result = get_crate_name("<u8 as <[_]>::to_vec_in::ConvertVec>::to_vec::<>");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "u8");
+        assert_eq!(parts, vec!["u8", "to_vec"]);
     }
 }
