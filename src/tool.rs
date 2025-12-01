@@ -48,11 +48,52 @@ pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
 }
 
 /// Parse angle bracket symbols like trait impls and type methods
+/// Extracts only the innermost type path and the outermost method name
 fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
-    // Find matching '>' for the outer angle bracket
+    // Extract innermost type and outermost method
+    let (inner_type, outer_method) = extract_inner_type_and_outer_method(symbols)?;
+
+    let mut parts = Vec::with_capacity(4);
+
+    // Add type path parts
+    let type_clean = inner_type.trim_start_matches(['&', '*']);
+    for part in split_symbol_parts(type_clean) {
+        if !part.is_empty() && part != "<>" {
+            parts.push(part);
+        }
+    }
+
+    // Add outer method
+    if !outer_method.is_empty() {
+        for part in split_symbol_parts(&outer_method) {
+            if !part.is_empty() && part != "<>" {
+                parts.push(part);
+            }
+        }
+    }
+
+    if parts.len() > 1 {
+        let crate_name = parts[0].clone();
+        if symbol_is_crate(&crate_name) {
+            return Some((crate_name, parts));
+        }
+    }
+    None
+}
+
+/// Extract the innermost type and outermost method from nested angle bracket expression
+/// For `<<u64 as Trait1>::method1 as Trait2>::method2` returns ("u64", "method2")
+fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
+    let s = s.trim();
+
+    if !s.starts_with('<') {
+        return None;
+    }
+
+    // Find matching '>' for the outermost angle bracket
     let mut depth = 0;
     let mut close_pos = None;
-    for (i, c) in symbols.char_indices() {
+    for (i, c) in s.char_indices() {
         match c {
             '<' => depth += 1,
             '>' => {
@@ -67,51 +108,22 @@ fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
     }
 
     let close_pos = close_pos?;
-    let inner = &symbols[1..close_pos];
 
-    // Check for trait impl pattern: `<Type as Trait>` or simple type: `<Type>`
+    // Get outer method (after `>::`)
+    let outer_method = s[close_pos..].strip_prefix(">::").unwrap_or("").to_string();
+
+    // Get inner content
+    let inner = &s[1..close_pos];
+
+    // Find type part (before " as " at depth 0)
     let type_part = find_type_part(inner);
 
-    // Handle nested angle brackets at start: <<Type as Trait>::method>
-    let type_clean = type_part
-        .trim_start_matches(['&', '*', '<'])
-        .trim_end_matches('>');
-
-    // For double angle bracket patterns, recursively parse
+    // If type_part starts with '<', recursively extract innermost type
     if type_part.starts_with('<') {
-        // Try to extract crate from nested pattern
-        if let Some((crate_name, mut inner_parts)) = parse_angle_bracket_symbol(type_part) {
-            // Add method name after `>::`
-            if let Some(method) = symbols[close_pos..].strip_prefix(">::") {
-                inner_parts.extend(split_symbol_parts(method));
-            }
-            if inner_parts.len() > 1 {
-                return Some((crate_name, inner_parts));
-            }
-        }
-        return None;
-    }
-
-    let type_crate = type_clean.split("::").next()?;
-
-    if !symbol_is_crate(type_crate) {
-        return None;
-    }
-
-    // Build symbol parts: crate + type path + method
-    let mut parts = Vec::with_capacity(4);
-    parts.push(type_crate.to_string());
-    parts.extend(type_clean.split("::").skip(1).map(String::from));
-
-    // Add method name after `>::`
-    if let Some(method) = symbols[close_pos..].strip_prefix(">::") {
-        parts.extend(split_symbol_parts(method));
-    }
-
-    if parts.len() > 1 {
-        Some((parts[0].clone(), parts))
+        let (inner_type, _) = extract_inner_type_and_outer_method(type_part)?;
+        Some((inner_type, outer_method))
     } else {
-        None
+        Some((type_part.to_string(), outer_method))
     }
 }
 
@@ -306,12 +318,27 @@ mod test {
         let (crate_name, _parts) = result.unwrap();
         assert_eq!(crate_name, "signal_hook_registry");
 
-        // Test double angle bracket
+        // Test double angle bracket with multiple "as" - should only keep innermost type + outermost method
         let result = get_crate_name(
             "<<u64 as serde_core::de::Deserialize>::deserialize::PrimitiveVisitor as serde_core::de::Visitor>::expecting",
         );
         assert!(result.is_some());
-        let (crate_name, _parts) = result.unwrap();
+        let (crate_name, parts) = result.unwrap();
         assert_eq!(crate_name, "u64");
+        assert_eq!(parts, vec!["u64", "expecting"], "parts: {:?}", parts);
+
+        // Test another complex case with multiple as
+        let result = get_crate_name(
+            "<<easy_install::manfiest::AssetKind as serde_core::de::Deserialize>::deserialize::__FieldVisitor as serde_core::de::Visitor>::expecting",
+        );
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "easy_install");
+        assert_eq!(
+            parts,
+            vec!["easy_install", "manfiest", "AssetKind", "expecting"],
+            "parts: {:?}",
+            parts
+        );
     }
 }
