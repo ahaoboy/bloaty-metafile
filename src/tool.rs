@@ -14,25 +14,79 @@ pub fn symbol_is_crate(s: &str) -> bool {
 }
 
 /// Extract crate name and symbol parts from a symbol string
+/// Supports both regular symbols and angle bracket symbols:
+/// - Regular: `crate::module::func`
+/// - Trait impl: `<&core::alloc::layout::Layout as core::fmt::Debug>::fmt`
+/// - Type method: `<url::Url>::set_password`
 /// Returns the crate name and all symbol parts if valid, None otherwise
 pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
-    // Split symbol string by "::" separator
-    let mut parts = symbols.split("::");
+    // Handle angle bracket symbols (trait impls, type methods)
+    if symbols.starts_with('<') {
+        // Find matching '>' for the outer angle bracket
+        let mut depth = 0;
+        let mut close_pos = None;
+        for (i, c) in symbols.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close_pos = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
 
-    // Check if first part is a valid crate name
-    let first = parts.next()?;
+        let close_pos = close_pos?;
+        let inner = &symbols[1..close_pos];
+
+        // Check for trait impl pattern: `<Type as Trait>` or simple type: `<Type>`
+        let type_part = if let Some(as_pos) = inner.find(" as ") {
+            &inner[..as_pos]
+        } else {
+            inner
+        };
+
+        // Extract crate name from type part (skip leading & or *)
+        let type_clean = type_part.trim_start_matches(['&', '*']);
+        let type_crate = type_clean.split("::").next()?;
+
+        if !symbol_is_crate(type_crate) {
+            return None;
+        }
+
+        // Build symbol parts: crate + type path + method
+        let mut parts = Vec::with_capacity(4);
+        parts.push(type_crate.to_string());
+        parts.extend(type_clean.split("::").skip(1).map(String::from));
+
+        // Add method name after `>::`
+        if let Some(method) = symbols[close_pos..].strip_prefix(">::") {
+            parts.extend(method.split("::").filter(|s| !s.is_empty()).map(String::from));
+        }
+
+        if parts.len() > 1 {
+            return Some((parts[0].clone(), parts));
+        }
+        return None;
+    }
+
+    // Handle regular symbols
+    let mut parts_iter = symbols.split("::");
+    let first = parts_iter.next()?;
+
     if !symbol_is_crate(first) {
         return None;
     }
 
-    // Collect all parts into a vector
-    let mut symbols_parts = Vec::with_capacity(4); // Pre-allocate for typical symbol depth
-    symbols_parts.push(first.to_string());
-    symbols_parts.extend(parts.map(String::from));
+    let mut parts = Vec::with_capacity(4);
+    parts.push(first.to_string());
+    parts.extend(parts_iter.map(String::from));
 
-    // Need at least 2 parts (crate::symbol)
-    if symbols_parts.len() > 1 {
-        Some((symbols_parts[0].clone(), symbols_parts))
+    if parts.len() > 1 {
+        Some((parts[0].clone(), parts))
     } else {
         None
     }
@@ -67,7 +121,7 @@ pub fn get_path_from_record(symbols: String, sections: String, packages: &Packag
 
 #[cfg(test)]
 mod test {
-    use super::symbol_is_crate;
+    use super::{get_crate_name, symbol_is_crate};
 
     #[test]
     fn test_symbol_is_crate() {
@@ -91,5 +145,37 @@ mod test {
                 symbol
             );
         }
+    }
+
+    #[test]
+    fn test_get_crate_name_angle_bracket() {
+        // Test trait impl: <&core::alloc::layout::Layout as core::fmt::Debug>::fmt
+        let result = get_crate_name("<&core::alloc::layout::Layout as core::fmt::Debug>::fmt");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "core");
+        assert_eq!(parts, vec!["core", "alloc", "layout", "Layout", "fmt"]);
+
+        // Test type method: <url::Url>::set_password
+        let result = get_crate_name("<url::Url>::set_password");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "url");
+        assert_eq!(parts, vec!["url", "Url", "set_password"]);
+
+        // Test: <core::alloc::layout::LayoutError as core::fmt::Debug>::fmt
+        let result =
+            get_crate_name("<core::alloc::layout::LayoutError as core::fmt::Debug>::fmt");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "core");
+        assert_eq!(parts, vec!["core", "alloc", "layout", "LayoutError", "fmt"]);
+
+        // Test regular symbol still works
+        let result = get_crate_name("llrt_utils::clone::structured_clone");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "llrt_utils");
+        assert_eq!(parts, vec!["llrt_utils", "clone", "structured_clone"]);
     }
 }
