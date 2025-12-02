@@ -4,6 +4,67 @@ pub const ROOT_NAME: &str = "ROOT";
 pub const UNKNOWN_NAME: &str = "UNKNOWN";
 pub const SECTIONS_NAME: &str = "SECTIONS";
 
+/// Rust primitive types that should be converted to std::primitive::xxx
+const PRIMITIVE_TYPES: &[&str] = &[
+    "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32",
+    "u64", "u128", "usize", "str",
+];
+
+/// Check if a type is a Rust primitive type
+#[inline]
+fn is_primitive_type(s: &str) -> bool {
+    PRIMITIVE_TYPES.contains(&s)
+}
+
+/// Normalize a type string, converting primitives to std::primitive::xxx
+/// - `()` -> `std::primitive::unit`
+/// - `&str` -> `std::primitive::str`
+/// - `u8`, `i32`, etc. -> `std::primitive::xxx`
+/// - `[u8]` -> `std::primitive::slice`
+/// - `*mut T` / `*const T` -> keeps the inner type
+fn normalize_type(s: &str) -> String {
+    let s = s.trim();
+
+    // Handle unit type ()
+    if s == "()" {
+        return "std::primitive::unit".to_string();
+    }
+
+    // Handle tuple types like (A, B)
+    if s.starts_with('(') && s.ends_with(')') {
+        return "std::primitive::tuple".to_string();
+    }
+
+    // Handle slice types like [u8]
+    if s.starts_with('[') && s.ends_with(']') {
+        return "std::primitive::slice".to_string();
+    }
+
+    // Handle reference types &str, &T
+    if let Some(inner) = s.strip_prefix('&') {
+        let inner = inner.trim();
+        if is_primitive_type(inner) {
+            return format!("std::primitive::{}", inner);
+        }
+        return normalize_type(inner);
+    }
+
+    // Handle pointer types *mut T, *const T
+    if let Some(inner) = s.strip_prefix("*mut ") {
+        return normalize_type(inner.trim());
+    }
+    if let Some(inner) = s.strip_prefix("*const ") {
+        return normalize_type(inner.trim());
+    }
+
+    // Handle primitive types
+    if is_primitive_type(s) {
+        return format!("std::primitive::{}", s);
+    }
+
+    s.to_string()
+}
+
 /// Check if a symbol string represents a valid crate name
 /// Returns false if the symbol contains invalid patterns or is a special marker
 #[inline]
@@ -55,9 +116,9 @@ fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
 
     let mut parts = Vec::with_capacity(4);
 
-    // Add type path parts
-    let type_clean = inner_type.trim_start_matches(['&', '*']);
-    for part in split_symbol_parts(type_clean) {
+    // Normalize and add type path parts
+    let normalized_type = normalize_type(&inner_type);
+    for part in split_symbol_parts(&normalized_type) {
         if !part.is_empty() && part != "<>" {
             parts.push(part);
         }
@@ -127,6 +188,24 @@ fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
     }
 }
 
+/// Clean a symbol part to make it a valid identifier
+/// Removes trailing `<>`, `()`, and other invalid characters
+fn clean_symbol_part(s: &str) -> String {
+    let mut result = s.to_string();
+
+    // Remove trailing () and <>
+    while result.ends_with("()") || result.ends_with("<>") {
+        if result.ends_with("()") {
+            result.truncate(result.len() - 2);
+        }
+        if result.ends_with("<>") {
+            result.truncate(result.len() - 2);
+        }
+    }
+
+    result
+}
+
 /// Split symbol string into parts, handling special syntax like {closure#0}, {shim:vtable#0}, ::<>
 fn split_symbol_parts(s: &str) -> Vec<String> {
     let mut parts = Vec::new();
@@ -173,9 +252,10 @@ fn split_symbol_parts(s: &str) -> Vec<String> {
         parts.push(current);
     }
 
-    // Filter out empty generic markers
+    // Clean and filter parts
     parts
         .into_iter()
+        .map(|p| clean_symbol_part(&p))
         .filter(|p| !p.is_empty() && p != "<>")
         .collect()
 }
@@ -290,8 +370,8 @@ mod test {
         let result = get_crate_name("<u8 as <[_]>::to_vec_in::ConvertVec>::to_vec::<>");
         assert!(result.is_some());
         let (crate_name, parts) = result.unwrap();
-        assert_eq!(crate_name, "u8");
-        assert_eq!(parts, vec!["u8", "to_vec"]);
+        assert_eq!(crate_name, "std");
+        assert_eq!(parts, vec!["std", "primitive", "u8", "to_vec"]);
 
         // Test closure syntax
         let result = get_crate_name("std::sys::backtrace::_print_fmt::{closure#1}::{closure#0}");
@@ -319,13 +399,19 @@ mod test {
         assert_eq!(crate_name, "signal_hook_registry");
 
         // Test double angle bracket with multiple "as" - should only keep innermost type + outermost method
+        // Note: u64 is now normalized to std::primitive::u64
         let result = get_crate_name(
             "<<u64 as serde_core::de::Deserialize>::deserialize::PrimitiveVisitor as serde_core::de::Visitor>::expecting",
         );
         assert!(result.is_some());
         let (crate_name, parts) = result.unwrap();
-        assert_eq!(crate_name, "u64");
-        assert_eq!(parts, vec!["u64", "expecting"], "parts: {:?}", parts);
+        assert_eq!(crate_name, "std");
+        assert_eq!(
+            parts,
+            vec!["std", "primitive", "u64", "expecting"],
+            "parts: {:?}",
+            parts
+        );
 
         // Test another complex case with multiple as
         let result = get_crate_name(
@@ -337,6 +423,97 @@ mod test {
         assert_eq!(
             parts,
             vec!["easy_install", "manfiest", "AssetKind", "expecting"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test unit type ()
+        let result = get_crate_name("<() as rquickjs_core::value::convert::IntoJs>::into_js");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "std");
+        assert_eq!(
+            parts,
+            vec!["std", "primitive", "unit", "into_js"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test &str type
+        let result = get_crate_name("<&str as rquickjs_core::value::convert::IntoJs>::into_js");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "std");
+        assert_eq!(
+            parts,
+            vec!["std", "primitive", "str", "into_js"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test *mut pointer type
+        let result = get_crate_name("<*mut core::ffi::c_void as core::fmt::Debug>::fmt");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "core");
+        assert_eq!(parts, vec!["core", "ffi", "c_void", "fmt"], "parts: {:?}", parts);
+
+        // Test slice type [u8]
+        let result = get_crate_name("<[u8] as core::fmt::Debug>::fmt");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "std");
+        assert_eq!(
+            parts,
+            vec!["std", "primitive", "slice", "fmt"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test tuple type
+        let result = get_crate_name("<(swc_common::syntax_pos::Span, swc_ecma_parser::error::SyntaxError) as core::clone::Clone>::clone");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "std");
+        assert_eq!(
+            parts,
+            vec!["std", "primitive", "tuple", "clone"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test C++ style symbols - <> and () should be removed
+        let result = get_crate_name("snmalloc::FreeListMPSCQ<>::destroy_and_iterate<>()");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "snmalloc");
+        assert_eq!(
+            parts,
+            vec!["snmalloc", "FreeListMPSCQ", "destroy_and_iterate"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test C++ style with template
+        let result = get_crate_name("snmalloc::LocalAllocator<>::init()");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "snmalloc");
+        assert_eq!(
+            parts,
+            vec!["snmalloc", "LocalAllocator", "init"],
+            "parts: {:?}",
+            parts
+        );
+
+        // Test C++ style static member
+        let result = get_crate_name("snmalloc::StandardConfigClientMeta<>::initialisation_lock");
+        assert!(result.is_some());
+        let (crate_name, parts) = result.unwrap();
+        assert_eq!(crate_name, "snmalloc");
+        assert_eq!(
+            parts,
+            vec!["snmalloc", "StandardConfigClientMeta", "initialisation_lock"],
             "parts: {:?}",
             parts
         );
