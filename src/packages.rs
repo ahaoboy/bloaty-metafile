@@ -4,6 +4,7 @@ use cargo_lock::dependency::{
     graph::{Graph, NodeIndex},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 /// Package dependency resolver
@@ -13,10 +14,16 @@ pub struct Packages {
     parent: FxHashMap<String, Vec<String>>,
 }
 
-/// Helper function to normalize crate names by replacing hyphens with underscores
+/// Helper function to normalize crate names by replacing hyphens with underscores.
+/// Returns Cow to avoid allocating a String when the name has no hyphens
+/// (the common case for most crate names in the dependency graph).
 #[inline]
-fn normalize_crate_name(name: &str) -> String {
-    name.replace('-', "_")
+fn normalize_crate_name(name: &str) -> Cow<'_, str> {
+    if name.contains('-') {
+        Cow::Owned(name.replace('-', "_"))
+    } else {
+        Cow::Borrowed(name)
+    }
 }
 
 /// Node used in breadth-first search traversal of the dependency graph
@@ -32,14 +39,23 @@ impl BfsNode {
     #[inline]
     fn from_graph(g: &Graph, index: NodeIndex, parent_path: Option<Vec<String>>) -> Self {
         let name = normalize_crate_name(g[index].name.as_str());
-        let name_boxed: Box<str> = name.as_str().into();
 
+        // Convert Cow<str> → Box<str> without an intermediate String allocation:
+        // - Cow::Borrowed: single Box<str> allocation from &str
+        // - Cow::Owned: convert String → Box<str> in-place (reuses heap buffer)
+        let name_boxed: Box<str> = match name {
+            Cow::Borrowed(s) => s.into(),
+            Cow::Owned(s) => s.into_boxed_str(),
+        };
+
+        // For the path, we need an owned String. Re-extract from the Box<str>
+        // to avoid keeping both the Cow and the String alive.
         let path = match parent_path {
             Some(mut p) => {
-                p.push(name);
+                p.push(name_boxed.as_ref().to_string());
                 p
             }
-            None => vec![name],
+            None => vec![name_boxed.as_ref().to_string()],
         };
 
         Self {

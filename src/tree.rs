@@ -89,10 +89,10 @@ impl Tree {
 
         // Build tree from records
         for record in records {
-            let sym = if record.symbols.is_empty() {
-                UNKNOWN_NAME.to_string()
+            let sym: &str = if record.symbols.is_empty() {
+                UNKNOWN_NAME
             } else {
-                record.symbols
+                &record.symbols
             };
             let path = get_path_from_record(sym, record.sections, &packages);
             if no_sections && path[0] == SECTIONS_NAME {
@@ -214,26 +214,27 @@ impl Node {
         // Check if we're at the depth limit
         let at_depth_limit = deep != 0 && current_depth >= deep;
 
-        // Build imports (only if not at depth limit)
+        // Build imports (only if not at depth limit).
+        // Pre-allocate with exact child count — HashMap::values() doesn't provide
+        // a size hint, so collect() would otherwise reallocate multiple times.
         let imports: Vec<Import> = if at_depth_limit {
-            vec![]
+            Vec::new()
         } else {
-            self.nodes
-                .values()
-                .map(|child| {
-                    let mut import_path = String::with_capacity(dir.len() + 1 + child.name.len());
-                    import_path.push_str(&dir);
-                    import_path.push('/');
-                    import_path.push_str(&child.name);
-                    Import {
-                        path: import_path,
-                        kind: None,
-                        external: false,
-                        original: None,
-                        with: None,
-                    }
-                })
-                .collect()
+            let mut imports = Vec::with_capacity(self.nodes.len());
+            for child in self.nodes.values() {
+                let mut import_path = String::with_capacity(dir.len() + 1 + child.name.len());
+                import_path.push_str(&dir);
+                import_path.push('/');
+                import_path.push_str(&child.name);
+                imports.push(Import {
+                    path: import_path,
+                    kind: None,
+                    external: false,
+                    original: None,
+                    with: None,
+                });
+            }
+            imports
         };
 
         // Use total_filesize when at depth limit to include all children's sizes

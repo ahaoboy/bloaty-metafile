@@ -18,8 +18,11 @@ pub struct Args {
     #[arg(short, long, default_value = "0")]
     pub deep: usize,
 
-    #[arg(long, default_value = "false")]
-    pub no_sections: bool,
+    /// Include section-level entries in the output.
+    /// Sections are excluded by default as they occupy too much space
+    /// and provide little useful information for crate-level analysis.
+    #[arg(long, default_value_t = false)]
+    pub sections: bool,
 
     #[arg()]
     pub path: Option<String>,
@@ -31,7 +34,7 @@ fn main() -> Result<(), BloatyError> {
         lock,
         deep,
         path,
-        no_sections,
+        sections,
     } = Args::parse();
 
     // Read CSV input from file or stdin
@@ -48,7 +51,8 @@ fn main() -> Result<(), BloatyError> {
     };
 
     // Parse CSV and generate metafile
-    let meta = from_csv(&csv, &name, lock, deep, no_sections)?;
+    // sections defaults to false → no_sections = true (exclude sections by default)
+    let meta = from_csv(&csv, &name, lock, deep, !sections)?;
 
     // Serialize to JSON — use to_vec to skip the redundant UTF-8 validation
     // that to_string performs (serde_json output is always valid UTF-8).

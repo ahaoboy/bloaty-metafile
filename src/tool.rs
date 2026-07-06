@@ -115,13 +115,14 @@ pub fn get_crate_name(symbols: &str) -> Option<(String, Vec<String>)> {
 /// Parse angle bracket symbols like trait impls and type methods
 /// Extracts only the innermost type path and the outermost method name
 fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
-    // Extract innermost type and outermost method
+    // Extract innermost type and outermost method — both are &str slices
+    // of `symbols`, avoiding 2 String allocations.
     let (inner_type, outer_method) = extract_inner_type_and_outer_method(symbols)?;
 
     let mut parts = Vec::with_capacity(4);
 
     // Normalize and add type path parts
-    let normalized_type = normalize_type(&inner_type);
+    let normalized_type = normalize_type(inner_type);
     for part in split_symbol_parts(&normalized_type) {
         if !part.is_empty() && part != "<>" {
             parts.push(part);
@@ -130,7 +131,7 @@ fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
 
     // Add outer method
     if !outer_method.is_empty() {
-        for part in split_symbol_parts(&outer_method) {
+        for part in split_symbol_parts(outer_method) {
             if !part.is_empty() && part != "<>" {
                 parts.push(part);
             }
@@ -148,7 +149,9 @@ fn parse_angle_bracket_symbol(symbols: &str) -> Option<(String, Vec<String>)> {
 
 /// Extract the innermost type and outermost method from nested angle bracket expression
 /// For `<<u64 as Trait1>::method1 as Trait2>::method2` returns ("u64", "method2")
-fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
+///
+/// Returns borrowed slices of the input to avoid 2 String allocations per call.
+fn extract_inner_type_and_outer_method(s: &str) -> Option<(&str, &str)> {
     let s = s.trim();
 
     if !s.starts_with('<') {
@@ -174,8 +177,8 @@ fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
 
     let close_pos = close_pos?;
 
-    // Get outer method (after `>::`)
-    let outer_method = s[close_pos..].strip_prefix(">::").unwrap_or("").to_string();
+    // Get outer method (after `>::`) — borrowed slice, no allocation
+    let outer_method = s[close_pos..].strip_prefix(">::").unwrap_or("");
 
     // Get inner content
     let inner = &s[1..close_pos];
@@ -188,7 +191,7 @@ fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
         let (inner_type, _) = extract_inner_type_and_outer_method(type_part)?;
         Some((inner_type, outer_method))
     } else {
-        Some((type_part.to_string(), outer_method))
+        Some((type_part, outer_method))
     }
 }
 
@@ -212,8 +215,11 @@ fn clean_symbol_part(mut s: String) -> String {
 
 /// Split symbol string into parts, handling special syntax like {closure#0}, {shim:vtable#0}, ::<>
 fn split_symbol_parts(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
+    // Pre-allocate based on estimated part count and string length to avoid
+    // reallocations during parsing.
+    let estimated_parts = s.matches("::").count() + 1;
+    let mut parts: Vec<String> = Vec::with_capacity(estimated_parts);
+    let mut current = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     let mut brace_depth = 0;
     let mut angle_depth = 0;
@@ -241,8 +247,7 @@ fn split_symbol_parts(s: &str) -> Vec<String> {
                 if chars.peek() == Some(&':') {
                     chars.next(); // consume second ':'
                     if !current.is_empty() {
-                        parts.push(current);
-                        current = String::new();
+                        parts.push(std::mem::take(&mut current));
                     }
                 } else {
                     current.push(c);
@@ -288,8 +293,11 @@ fn find_type_part(inner: &str) -> &str {
 
 /// Build a hierarchical path from a symbol record
 /// Combines package dependencies, sections, and symbol parts into a single path
-pub fn get_path_from_record(symbols: String, sections: String, packages: &Packages) -> Vec<String> {
-    match get_crate_name(&symbols) {
+///
+/// `symbols` is borrowed (&str) to avoid allocating UNKNOWN_NAME.to_string()
+/// for empty symbols in the caller.
+pub fn get_path_from_record(symbols: &str, sections: String, packages: &Packages) -> Vec<String> {
+    match get_crate_name(symbols) {
         None => {
             // No crate found: build path from sections
             // Pre-allocate capacity for sections + symbol parts

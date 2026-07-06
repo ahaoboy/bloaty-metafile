@@ -31,7 +31,7 @@ cargo build --profile bloaty
 bloaty ./target/bloaty/bloaty-metafile -d sections,symbols -n 0 --csv > meta.csv
 
 bloaty-metafile meta.csv > meta.json
-bloaty-metafile meta.csv --no-sections > meta.json
+bloaty-metafile meta.csv --sections > meta.json
 ```
 
 ## csv format
@@ -80,11 +80,16 @@ deep: 0, json: 80M
 ![llrt-deep-0](https://github.com/user-attachments/assets/b2cbf935-340e-4dbd-8ca3-191340c9ae35)
 
 
-### no-sections
+### sections
 
-Filter out SECTIONS that failed to count crates, and only display the recognized crate size usage.
+By default, section-level entries are excluded from the output as they occupy too much space and provide little useful information for crate-level analysis.
 
-The default value of no-sections is false
+Use `--sections` to include them.
+
+```bash
+bloaty-metafile meta.csv > meta.json              # sections excluded (default)
+bloaty-metafile meta.csv --sections > meta.json   # sections included
+```
 
 
 ## Conversion rules

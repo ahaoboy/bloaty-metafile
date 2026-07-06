@@ -87,7 +87,7 @@ jobs:
 
             bloaty "$bin" -d sections,symbols -n 0 --csv > "$csv"
 
-            bloaty-metafile "$csv" --name="$name" --lock="$name.lock" --no-sections > "$json"
+            bloaty-metafile "$csv" --name="$name" --lock="$name.lock" > "$json"
 
             metafile-image "$json" "${name}-${{ matrix.os }}.png"
             metafile-viz   "$json" -o "${name}-${{ matrix.os }}-viz.png"
