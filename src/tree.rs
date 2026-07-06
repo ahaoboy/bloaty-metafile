@@ -109,26 +109,17 @@ impl Tree {
     pub fn to_metafile(&self, name: &str, deep: usize) -> Metafile {
         let root = &self.root;
 
-        // Pre-allocate HashMap with estimated capacity
-        let mut inputs = HashMap::with_capacity(root.nodes.len() * 4);
+        // Pre-allocate HashMaps with estimated capacity
+        let capacity = root.nodes.len() * 4;
+        let mut inputs = HashMap::with_capacity(capacity);
+        let mut output_inputs = HashMap::with_capacity(capacity);
 
-        // Traverse all root nodes to build inputs
+        // Traverse all root nodes to build inputs and output_inputs simultaneously.
+        // output_inputs maps each path to InputDetail { bytes_in_output: input.bytes },
+        // which is exactly what the original post-traverse iteration produced.
         for node in root.nodes.values() {
-            node.traverse(&mut inputs, None, deep);
+            node.traverse(&mut inputs, &mut output_inputs, None, 0, deep);
         }
-
-        // Build output_inputs using iterator chain
-        let output_inputs: HashMap<_, _> = inputs
-            .iter()
-            .map(|(path, input)| {
-                (
-                    path.clone(),
-                    InputDetail {
-                        bytes_in_output: input.bytes,
-                    },
-                )
-            })
-            .collect();
 
         let output = Output {
             bytes: root.total_filesize,
@@ -154,17 +145,18 @@ impl Tree {
             current.total_filesize += filesize;
 
             let is_leaf = i == last_idx;
-            let part_boxed: Box<str> = part.as_str().into();
+            let part_str: &str = part;
 
-            // Use entry API to avoid double lookup
-            current = current.nodes.entry(part_boxed.clone()).or_insert_with(|| {
-                Node::create_node(
-                    part_boxed.clone(),
-                    0, // Initialize with 0, will be accumulated below
-                    0,
-                    is_leaf,
-                )
-            });
+            // Avoid allocating a Box<str> key when the entry already exists.
+            // contains_key borrows immutably and releases immediately, so the
+            // subsequent mutable borrow in either branch is valid.
+            if current.nodes.contains_key(part_str) {
+                current = current.nodes.get_mut(part_str).unwrap();
+            } else {
+                let part_boxed: Box<str> = part_str.into();
+                let new_node = Node::create_node(part_boxed.clone(), 0, 0, is_leaf);
+                current = current.nodes.entry(part_boxed).or_insert(new_node);
+            }
 
             // Accumulate leaf node values (don't overwrite)
             if is_leaf {
@@ -193,22 +185,31 @@ impl Node {
         }
     }
 
-    /// Recursively traverse the tree to build metafile inputs
-    /// Respects the depth limit if specified
-    fn traverse(&self, inputs: &mut HashMap<String, Input>, dir: Option<String>, deep: usize) {
+    /// Recursively traverse the tree to build metafile inputs and output_inputs.
+    /// Respects the depth limit if specified.
+    /// `current_depth` is passed as a parameter instead of scanning dir for '/'
+    /// (O(1) vs O(n) per node, producing the same value).
+    /// `parent` is passed as `&str` instead of `String` to avoid cloning the
+    /// full path for each child (saves N-1 String clones per node).
+    fn traverse(
+        &self,
+        inputs: &mut HashMap<String, Input>,
+        output_inputs: &mut HashMap<String, InputDetail>,
+        parent: Option<&str>,
+        current_depth: usize,
+        deep: usize,
+    ) {
         // Build directory path with capacity pre-allocation
-        let dir: String = match &dir {
-            Some(parent) => {
-                let mut path = String::with_capacity(parent.len() + 1 + self.name.len());
-                path.push_str(parent);
+        let dir: String = match parent {
+            Some(p) => {
+                let mut path = String::with_capacity(p.len() + 1 + self.name.len());
+                path.push_str(p);
                 path.push('/');
                 path.push_str(&self.name);
                 path
             }
             None => self.name.to_string(),
         };
-
-        let current_depth = dir.matches('/').count();
 
         // Check if we're at the depth limit
         let at_depth_limit = deep != 0 && current_depth >= deep;
@@ -249,13 +250,22 @@ impl Node {
             with: None,
         };
 
+        // Insert into both maps simultaneously. output_inputs uses the same
+        // `bytes` value that the original post-traverse iteration copied from
+        // input.bytes, so the data is identical.
+        output_inputs.insert(
+            dir.clone(),
+            InputDetail {
+                bytes_in_output: bytes,
+            },
+        );
         inputs.insert(dir.clone(), input);
 
-        // Recurse into children only if not at depth limit
+        // Recurse into children only if not at depth limit.
+        // Pass &dir (no clone) to children; depth increments by 1.
         if !at_depth_limit && !self.nodes.is_empty() {
-            let dir_ref = Some(dir);
             for child in self.nodes.values() {
-                child.traverse(inputs, dir_ref.clone(), deep);
+                child.traverse(inputs, output_inputs, Some(&dir), current_depth + 1, deep);
             }
         }
     }

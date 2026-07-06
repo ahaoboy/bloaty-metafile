@@ -1,4 +1,5 @@
 use crate::packages::Packages;
+use std::borrow::Cow;
 
 pub const ROOT_NAME: &str = "ROOT";
 pub const UNKNOWN_NAME: &str = "UNKNOWN";
@@ -22,29 +23,32 @@ fn is_primitive_type(s: &str) -> bool {
 /// - `u8`, `i32`, etc. -> `std::primitive::xxx`
 /// - `[u8]` -> `std::primitive::slice`
 /// - `*mut T` / `*const T` -> keeps the inner type
-fn normalize_type(s: &str) -> String {
+///
+/// Returns `Cow` to avoid allocating a new `String` when no normalization
+/// is needed (the common case for user-defined types like `core::ffi::c_void`).
+fn normalize_type(s: &str) -> Cow<'_, str> {
     let s = s.trim();
 
     // Handle unit type ()
     if s == "()" {
-        return "std::primitive::unit".to_string();
+        return Cow::Borrowed("std::primitive::unit");
     }
 
     // Handle tuple types like (A, B)
     if s.starts_with('(') && s.ends_with(')') {
-        return "std::primitive::tuple".to_string();
+        return Cow::Borrowed("std::primitive::tuple");
     }
 
     // Handle slice types like [u8]
     if s.starts_with('[') && s.ends_with(']') {
-        return "std::primitive::slice".to_string();
+        return Cow::Borrowed("std::primitive::slice");
     }
 
     // Handle reference types &str, &T
     if let Some(inner) = s.strip_prefix('&') {
         let inner = inner.trim();
         if is_primitive_type(inner) {
-            return format!("std::primitive::{}", inner);
+            return Cow::Owned(format!("std::primitive::{}", inner));
         }
         return normalize_type(inner);
     }
@@ -59,10 +63,10 @@ fn normalize_type(s: &str) -> String {
 
     // Handle primitive types
     if is_primitive_type(s) {
-        return format!("std::primitive::{}", s);
+        return Cow::Owned(format!("std::primitive::{}", s));
     }
 
-    s.to_string()
+    Cow::Borrowed(s)
 }
 
 /// Check if a symbol string represents a valid crate name
@@ -189,21 +193,21 @@ fn extract_inner_type_and_outer_method(s: &str) -> Option<(String, String)> {
 }
 
 /// Clean a symbol part to make it a valid identifier
-/// Removes trailing `<>`, `()`, and other invalid characters
-fn clean_symbol_part(s: &str) -> String {
-    let mut result = s.to_string();
-
+/// Removes trailing `<>`, `()`, and other invalid characters.
+/// Takes ownership of the String and modifies in place, avoiding a
+/// re-allocation when no cleaning is needed (the String is moved through).
+fn clean_symbol_part(mut s: String) -> String {
     // Remove trailing () and <>
-    while result.ends_with("()") || result.ends_with("<>") {
-        if result.ends_with("()") {
-            result.truncate(result.len() - 2);
+    while s.ends_with("()") || s.ends_with("<>") {
+        if s.ends_with("()") {
+            s.truncate(s.len() - 2);
         }
-        if result.ends_with("<>") {
-            result.truncate(result.len() - 2);
+        if s.ends_with("<>") {
+            s.truncate(s.len() - 2);
         }
     }
 
-    result
+    s
 }
 
 /// Split symbol string into parts, handling special syntax like {closure#0}, {shim:vtable#0}, ::<>
@@ -252,10 +256,11 @@ fn split_symbol_parts(s: &str) -> Vec<String> {
         parts.push(current);
     }
 
-    // Clean and filter parts
+    // Clean and filter parts — clean_symbol_part takes ownership of the String
+    // and modifies in place, avoiding re-allocation when no cleaning is needed.
     parts
         .into_iter()
-        .map(|p| clean_symbol_part(&p))
+        .map(clean_symbol_part)
         .filter(|p| !p.is_empty() && p != "<>")
         .collect()
 }
@@ -456,7 +461,12 @@ mod test {
         assert!(result.is_some());
         let (crate_name, parts) = result.unwrap();
         assert_eq!(crate_name, "core");
-        assert_eq!(parts, vec!["core", "ffi", "c_void", "fmt"], "parts: {:?}", parts);
+        assert_eq!(
+            parts,
+            vec!["core", "ffi", "c_void", "fmt"],
+            "parts: {:?}",
+            parts
+        );
 
         // Test slice type [u8]
         let result = get_crate_name("<[u8] as core::fmt::Debug>::fmt");
@@ -471,7 +481,9 @@ mod test {
         );
 
         // Test tuple type
-        let result = get_crate_name("<(swc_common::syntax_pos::Span, swc_ecma_parser::error::SyntaxError) as core::clone::Clone>::clone");
+        let result = get_crate_name(
+            "<(swc_common::syntax_pos::Span, swc_ecma_parser::error::SyntaxError) as core::clone::Clone>::clone",
+        );
         assert!(result.is_some());
         let (crate_name, parts) = result.unwrap();
         assert_eq!(crate_name, "std");
@@ -513,7 +525,11 @@ mod test {
         assert_eq!(crate_name, "snmalloc");
         assert_eq!(
             parts,
-            vec!["snmalloc", "StandardConfigClientMeta", "initialisation_lock"],
+            vec![
+                "snmalloc",
+                "StandardConfigClientMeta",
+                "initialisation_lock"
+            ],
             "parts: {:?}",
             parts
         );

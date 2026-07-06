@@ -3,13 +3,14 @@ use cargo_lock::dependency::{
     Tree,
     graph::{Graph, NodeIndex},
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 
 /// Package dependency resolver
 /// Maps crate names to their dependency paths in the dependency tree
 #[derive(Debug, Default, Clone)]
 pub struct Packages {
-    parent: HashMap<String, Vec<String>>,
+    parent: FxHashMap<String, Vec<String>>,
 }
 
 /// Helper function to normalize crate names by replacing hyphens with underscores
@@ -54,7 +55,7 @@ impl Packages {
     /// Uses BFS to find the shortest path to each crate in the dependency graph
     pub fn new(tree: &Tree, records: &[SectionRecord]) -> Self {
         // Build set of crate names from records
-        let crates: HashSet<String> = records
+        let crates: FxHashSet<String> = records
             .iter()
             .filter_map(|record| get_crate_name(&record.symbols))
             .map(|(name, _)| name)
@@ -63,11 +64,15 @@ impl Packages {
         let g = tree.graph();
         let roots = tree.roots().to_vec();
 
-        // Pre-allocate collections with estimated capacity
+        // Pre-allocate collections with estimated capacity.
+        // FxHashMap/FxHashSet use a faster non-cryptographic hasher; these maps
+        // are internal and never affect JSON output (get_path does key lookup only).
         let estimated_nodes = g.node_count();
-        let mut visited = HashSet::with_capacity(estimated_nodes);
+        let mut visited: FxHashSet<NodeIndex> =
+            FxHashSet::with_capacity_and_hasher(estimated_nodes, Default::default());
         let mut queue = VecDeque::with_capacity(estimated_nodes / 4);
-        let mut parent: HashMap<String, Vec<String>> = HashMap::with_capacity(crates.len());
+        let mut parent: FxHashMap<String, Vec<String>> =
+            FxHashMap::with_capacity_and_hasher(crates.len(), Default::default());
 
         // Initialize queue with root nodes
         for &start in &roots {
@@ -82,16 +87,17 @@ impl Packages {
 
             let name_str = name.as_ref();
 
-            // Insert or update path for this crate
-            parent
-                .entry(name_str.to_string())
-                .and_modify(|entry| {
-                    // Keep shorter path if crate is in records
-                    if crates.contains(name_str) && entry.len() > path.len() {
-                        *entry = path.clone();
-                    }
-                })
-                .or_insert_with(|| path.clone());
+            // Use get_mut + insert to avoid allocating a String key on every
+            // lookup. entry() requires an owned key, which wastes an allocation
+            // on cache hits (the common case after first visit).
+            if let Some(entry) = parent.get_mut(name_str) {
+                // Keep shorter path if crate is in records
+                if crates.contains(name_str) && entry.len() > path.len() {
+                    *entry = path.clone();
+                }
+            } else {
+                parent.insert(name_str.to_string(), path.clone());
+            }
 
             visited.insert(index);
 
@@ -105,9 +111,9 @@ impl Packages {
 
         // Ensure standard library crates (std, alloc) have entries
         for crate_name in crates {
-            parent
-                .entry(crate_name.clone())
-                .or_insert_with(|| vec![crate_name]);
+            if !parent.contains_key(&crate_name) {
+                parent.insert(crate_name.clone(), vec![crate_name]);
+            }
         }
 
         Self { parent }

@@ -11,6 +11,10 @@ pub enum BloatyError {
         source: std::io::Error,
     },
 
+    /// Error during I/O operations (e.g. writing to stdout)
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
     /// Error parsing CSV data
     #[error("Failed to parse CSV")]
     CsvParse(#[from] csv::Error),

@@ -1,5 +1,6 @@
 use bloaty_metafile::{BloatyError, from_csv};
 use clap::Parser;
+use std::io::Write;
 
 const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_HASH: &str = git_version::git_version!();
@@ -49,15 +50,16 @@ fn main() -> Result<(), BloatyError> {
     // Parse CSV and generate metafile
     let meta = from_csv(&csv, &name, lock, deep, no_sections)?;
 
-    // Serialize to JSON
-    let s = serde_json::to_string(&meta)?;
+    // Serialize to JSON — use to_vec to skip the redundant UTF-8 validation
+    // that to_string performs (serde_json output is always valid UTF-8).
+    let json_bytes = serde_json::to_vec(&meta)?;
 
-    // Check if JSON string is too large (JavaScript string length limit)
+    // Check if JSON output is too large (JavaScript string length limit)
     // JavaScript max string length is 2^30 - 1 (0x3fffffff) characters
     // But V8 uses 0x1fffffe8 as practical limit
     const MAX_JSON_LENGTH: usize = 0x1fff_ffe8; // ~536MB
 
-    let json_len = s.len();
+    let json_len = json_bytes.len();
 
     if json_len > MAX_JSON_LENGTH {
         eprintln!(
@@ -69,7 +71,11 @@ fn main() -> Result<(), BloatyError> {
         eprintln!("The output may not be usable in web-based tools like esbuild analyzer");
     }
 
-    println!("{s}");
+    // Write to stdout with a single locked handle to avoid repeated lock overhead.
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    lock.write_all(&json_bytes)?;
+    lock.write_all(b"\n")?;
 
     Ok(())
 }
